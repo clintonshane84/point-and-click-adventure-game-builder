@@ -34,6 +34,17 @@ export interface SceneObject {
 
 export type FacingDirection = 'up' | 'down' | 'left' | 'right'
 
+// ── Pathfinding ───────────────────────────────────────────────────────────────
+
+export interface BlockedZone {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface CharacterAnimation {
   spriteSheetId: string
   animationId: string
@@ -70,6 +81,7 @@ export interface Scene {
   backgroundImageUrl?: string
   objects: SceneObject[]
   characterPlacement?: CharacterPlacement
+  blockedZones?: BlockedZone[]
 }
 
 // Event types

@@ -4,10 +4,10 @@ import type Konva from 'konva'
 import {
   Plus, Trash2, MousePointer, ChevronDown,
   ImageIcon, X, ZoomIn, ZoomOut,
-  User, Box, Crosshair, Image, LayoutTemplate,
+  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { SceneObject, SceneObjectType, FacingDirection } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -70,6 +70,7 @@ export function SceneEditor() {
     project, addScene, deleteScene, setActiveScene,
     addSceneObject, updateSceneObject, deleteSceneObject,
     updateSceneCharacterPlacement,
+    addBlockedZone, deleteBlockedZone,
   } = useGameStore()
   const { scenes, activeSceneId, assets, mainCharacter } = project
 
@@ -98,6 +99,12 @@ export function SceneEditor() {
   const [showBgPicker, setShowBgPicker] = useState(false)
   const bgPickerRef = useRef<HTMLDivElement>(null)
 
+  // Path editing mode
+  const [pathMode, setPathMode] = useState(false)
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+  const [drawingZone, setDrawingZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
+  const isDrawingRef = useRef(false)
+
   const selectedObj = activeScene?.objects.find((o) => o.id === selectedObjId) ?? null
   const bgImage = useHtmlImage(activeScene?.backgroundImageUrl)
   const imageAssets = assets.filter((a) => a.type === 'image')
@@ -118,14 +125,21 @@ export function SceneEditor() {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       const tag = (document.activeElement as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if (!selectedObjId || !activeScene) return
-      deleteSceneObject(activeScene.id, selectedObjId)
-      setSelectedObjId(null)
-      transformerRef.current?.nodes([])
+      if (!activeScene) return
+      if (pathMode && selectedZoneId) {
+        deleteBlockedZone(activeScene.id, selectedZoneId)
+        setSelectedZoneId(null)
+        return
+      }
+      if (!pathMode && selectedObjId) {
+        deleteSceneObject(activeScene.id, selectedObjId)
+        setSelectedObjId(null)
+        transformerRef.current?.nodes([])
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedObjId, activeScene, deleteSceneObject])
+  }, [selectedObjId, selectedZoneId, pathMode, activeScene, deleteSceneObject, deleteBlockedZone])
 
   // ── Scroll-wheel zoom (Ctrl/Cmd + scroll) ──────────────────────────────────
   useEffect(() => {
@@ -191,11 +205,61 @@ export function SceneEditor() {
 
   // ── Canvas interactions ────────────────────────────────────────────────────
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (pathMode) {
+      // Click on empty canvas in path mode → deselect zone
+      if (e.target === e.target.getStage()) setSelectedZoneId(null)
+      return
+    }
     if (e.target === e.target.getStage()) {
       setSelectedObjId(null)
       transformerRef.current?.nodes([])
     }
   }
+
+  // Get scene coordinates from a Konva pointer position
+  const stageToScene = useCallback(() => {
+    const pos = stageRef.current?.getPointerPosition()
+    if (!pos || !activeScene) return null
+    const sx = (800 / activeScene.width) * zoom
+    const sy = (450 / activeScene.height) * zoom
+    return { x: pos.x / sx, y: pos.y / sy }
+  }, [activeScene, zoom])
+
+  const handleStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!pathMode || !activeScene) return
+    // Only start drawing on the stage background, not on existing zones
+    if (e.target !== e.target.getStage()) return
+    const pos = stageToScene()
+    if (!pos) return
+    isDrawingRef.current = true
+    setDrawingZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
+    setSelectedZoneId(null)
+  }, [pathMode, activeScene, stageToScene])
+
+  const handleStageMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!pathMode || !isDrawingRef.current) return
+    const pos = stageToScene()
+    if (!pos) return
+    setDrawingZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
+  }, [pathMode, stageToScene])
+
+  const handleStageMouseUp = useCallback(() => {
+    if (!pathMode || !isDrawingRef.current || !drawingZone || !activeScene) return
+    isDrawingRef.current = false
+    const w = Math.abs(drawingZone.w), h = Math.abs(drawingZone.h)
+    if (w > 10 && h > 10) {
+      const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
+      const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
+      const zone: BlockedZone = {
+        id: `zone-${Date.now()}`,
+        label: `Block ${(activeScene.blockedZones?.length ?? 0) + 1}`,
+        x, y, width: w, height: h,
+      }
+      addBlockedZone(activeScene.id, zone)
+      setSelectedZoneId(zone.id)
+    }
+    setDrawingZone(null)
+  }, [pathMode, drawingZone, activeScene, addBlockedZone])
 
   const handleObjectClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>, objId: string) => {
@@ -412,20 +476,51 @@ export function SceneEditor() {
 
         {/* Toolbar */}
         <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0 flex-wrap">
-          <button
-            onClick={() => setSelectedObjId(null)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-700 text-gray-300 hover:bg-gray-600"
-          >
-            <MousePointer size={14} /> Select
-          </button>
+          {!pathMode && (
+            <button
+              onClick={() => setSelectedObjId(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-gray-700 text-gray-300 hover:bg-gray-600"
+            >
+              <MousePointer size={14} /> Select
+            </button>
+          )}
 
-          {selectedObjId && (
+          {!pathMode && selectedObjId && (
             <button
               onClick={deleteSelected}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-red-700 hover:bg-red-600 text-white"
             >
               <Trash2 size={14} /> Delete
             </button>
+          )}
+
+          {/* Path mode toggle */}
+          <button
+            onClick={() => { setPathMode((v) => !v); setSelectedObjId(null); setSelectedZoneId(null); setDrawingZone(null) }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+              pathMode
+                ? 'bg-red-700 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+            title="Toggle path/blocking editor"
+          >
+            <ShieldOff size={14} />
+            {pathMode ? 'Pathing (ON)' : 'Pathing'}
+          </button>
+
+          {pathMode && selectedZoneId && (
+            <button
+              onClick={() => { if (activeScene) deleteBlockedZone(activeScene.id, selectedZoneId); setSelectedZoneId(null) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-red-700 hover:bg-red-600 text-white"
+            >
+              <Trash2 size={14} /> Delete Zone
+            </button>
+          )}
+
+          {pathMode && (
+            <span className="text-xs text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-700/30">
+              Click &amp; drag to draw blocked zones · Click zone to select · Del to remove
+            </span>
           )}
 
           {/* Zoom controls */}
@@ -466,7 +561,8 @@ export function SceneEditor() {
 
           <span className="text-xs text-gray-600 pl-2 border-l border-gray-700">
             {activeScene?.name} — {activeScene?.width}×{activeScene?.height}
-            {selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
+            {!pathMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
+            {pathMode && <span className="ml-2 text-red-400">{activeScene?.blockedZones?.length ?? 0} blocked zone{(activeScene?.blockedZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
           </span>
         </div>
 
@@ -487,6 +583,10 @@ export function SceneEditor() {
                 scaleX={scaleX}
                 scaleY={scaleY}
                 onClick={handleStageClick}
+                onMouseDown={handleStageMouseDown}
+                onMouseMove={handleStageMouseMove}
+                onMouseUp={handleStageMouseUp}
+                style={{ cursor: pathMode ? 'crosshair' : 'default' }}
               >
                 <Layer>
                   {/* Scene background color */}
@@ -602,6 +702,53 @@ export function SceneEditor() {
                     )
                   })()}
 
+                  {/* Blocked zones */}
+                  {(activeScene.blockedZones ?? []).map((zone) => {
+                    const isSel = zone.id === selectedZoneId
+                    return (
+                      <Rect
+                        key={zone.id}
+                        x={zone.x} y={zone.y}
+                        width={zone.width} height={zone.height}
+                        fill={isSel ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.18)'}
+                        stroke={isSel ? '#ef4444' : '#f87171'}
+                        strokeWidth={isSel ? 2.5 : 1.5}
+                        dash={isSel ? undefined : [6, 3]}
+                        listening={pathMode}
+                        onClick={pathMode ? (e) => { e.cancelBubble = true; setSelectedZoneId(zone.id) } : undefined}
+                      />
+                    )
+                  })}
+
+                  {/* Zone labels — only shown in path mode */}
+                  {pathMode && (activeScene.blockedZones ?? []).map((zone) => (
+                    <Text
+                      key={`lbl-z-${zone.id}`}
+                      x={zone.x + 4} y={zone.y + 4}
+                      text={zone.label}
+                      fontSize={10}
+                      fill="#fca5a5"
+                      listening={false}
+                    />
+                  ))}
+
+                  {/* Drawing preview */}
+                  {pathMode && drawingZone && (() => {
+                    const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
+                    const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
+                    return (
+                      <Rect
+                        x={x} y={y}
+                        width={Math.abs(drawingZone.w)} height={Math.abs(drawingZone.h)}
+                        fill="rgba(239,68,68,0.25)"
+                        stroke="#ef4444"
+                        strokeWidth={2}
+                        dash={[5, 3]}
+                        listening={false}
+                      />
+                    )
+                  })()}
+
                   <Transformer
                     ref={transformerRef}
                     boundBoxFunc={(oldBox, newBox) =>
@@ -618,10 +765,64 @@ export function SceneEditor() {
       {/* ── Right panel ─────────────────────────────────────────────────────── */}
       <div className="w-56 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-gray-700">
-          <span className="text-gray-300 text-sm font-semibold">Properties</span>
+          <span className="text-gray-300 text-sm font-semibold">
+            {pathMode ? 'Blocked Zone' : 'Properties'}
+          </span>
         </div>
 
-        {selectedObj && activeScene ? (
+        {/* Path mode: show selected zone properties */}
+        {pathMode && (() => {
+          const zone = (activeScene?.blockedZones ?? []).find((z) => z.id === selectedZoneId)
+          if (!zone || !activeScene) return (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <p className="text-gray-500 text-xs text-center leading-relaxed">
+                Click &amp; drag on the canvas to create a blocked zone.<br />
+                <span className="text-gray-600">Click an existing zone to edit it.</span>
+              </p>
+            </div>
+          )
+          return (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Label</label>
+                <input
+                  type="text"
+                  value={zone.label}
+                  onChange={(e) => useGameStore.getState().updateBlockedZone(activeScene.id, zone.id, { label: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-red-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(['x', 'y', 'width', 'height'] as const).map((prop) => (
+                  <div key={prop}>
+                    <label className="text-xs text-gray-400 block mb-1 uppercase">{prop === 'width' ? 'W' : prop === 'height' ? 'H' : prop.toUpperCase()}</label>
+                    <input
+                      type="number"
+                      value={Math.round(zone[prop])}
+                      onChange={(e) =>
+                        useGameStore.getState().updateBlockedZone(activeScene.id, zone.id, {
+                          [prop]: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-red-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => { deleteBlockedZone(activeScene.id, zone.id); setSelectedZoneId(null) }}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm bg-red-700 hover:bg-red-600 text-white mt-2"
+              >
+                <Trash2 size={13} /> Delete Zone
+              </button>
+              <p className="text-xs text-red-400/70 bg-red-900/10 rounded p-2">
+                Characters cannot walk through blocked zones at runtime.
+              </p>
+            </div>
+          )
+        })()}
+
+        {selectedObj && activeScene && !pathMode ? (
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
 
             {/* Name */}
@@ -719,14 +920,14 @@ export function SceneEditor() {
               </p>
             )}
           </div>
-        ) : (
+        ) : !pathMode ? (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-gray-500 text-xs text-center px-4 leading-relaxed">
               Select an object to edit its properties.<br />
               <span className="text-gray-600">Double-click a scene name to rename it.</span>
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* Scene properties */}
         {activeScene && (

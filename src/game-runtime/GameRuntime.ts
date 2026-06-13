@@ -2,12 +2,14 @@ import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation,
 } from '../types'
+import { findPath } from './pathfinding'
+import type { PathPoint } from './pathfinding'
 
 interface CharacterState {
   x: number
   y: number
-  targetX: number | null
-  targetY: number | null
+  waypoints: PathPoint[]
+  waypointIndex: number
   facing: FacingDirection
   moving: boolean
   animFrame: number
@@ -118,8 +120,8 @@ export class GameRuntime {
         this.state.character = {
           x: cp.x,
           y: cp.y,
-          targetX: null,
-          targetY: null,
+          waypoints: [],
+          waypointIndex: 0,
           facing,
           moving: false,
           animFrame: this.getAnimStartFrame(facing),
@@ -153,20 +155,29 @@ export class GameRuntime {
 
   private updateCharacter(dt: number) {
     const char = this.state.character
-    if (!char || !char.moving || char.targetX === null || char.targetY === null) return
+    const mc = this.project.mainCharacter
+    if (!char || !char.moving || !mc) return
 
-    const dx = char.targetX - char.x
-    const dy = char.targetY - char.y
+    const target = char.waypoints[char.waypointIndex]
+    if (!target) { char.moving = false; return }
+
+    // Target is centre of character → convert to top-left
+    const tx = target.x - mc.width / 2
+    const ty = target.y - mc.height / 2
+    const dx = tx - char.x
+    const dy = ty - char.y
     const dist = Math.sqrt(dx * dx + dy * dy)
 
     if (dist < 3) {
-      char.x = char.targetX
-      char.y = char.targetY
-      char.targetX = null
-      char.targetY = null
-      char.moving = false
-      char.animFrame = this.getAnimStartFrame(char.facing)
-      char.animTimer = 0
+      char.x = tx
+      char.y = ty
+      char.waypointIndex++
+      if (char.waypointIndex >= char.waypoints.length) {
+        // Arrived at final destination
+        char.moving = false
+        char.animFrame = this.getAnimStartFrame(char.facing)
+        char.animTimer = 0
+      }
       return
     }
 
@@ -397,14 +408,22 @@ export class GameRuntime {
       return
     }
 
-    // Nothing clicked — walk character to this position
+    // Nothing clicked — pathfind character to this position
     const char = this.state.character
     const mc = this.project.mainCharacter
     if (char && mc) {
-      // Center character on click point
-      char.targetX = pos.x - mc.width / 2
-      char.targetY = pos.y - mc.height / 2
-      char.moving = true
+      const path = findPath(
+        scene.blockedZones ?? [],
+        scene.width, scene.height,
+        char.x + mc.width / 2,
+        char.y + mc.height / 2,
+        pos.x, pos.y,
+      )
+      if (path.length > 0) {
+        char.waypoints = path
+        char.waypointIndex = 0
+        char.moving = true
+      }
     }
   }
 

@@ -22,6 +22,7 @@ import type {
   CharacterAnimation,
   FacingDirection,
   CharacterPlacement,
+  BlockedZone,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -177,6 +178,11 @@ interface GameStore {
   updateMainCharacter: (updates: Partial<MainCharacter>) => void
   setCharacterAnimation: (direction: FacingDirection, anim: CharacterAnimation | null) => void
   updateSceneCharacterPlacement: (sceneId: string, placement: Partial<CharacterPlacement>) => void
+
+  // Blocked zone (pathfinding) actions
+  addBlockedZone: (sceneId: string, zone: BlockedZone) => void
+  updateBlockedZone: (sceneId: string, zoneId: string, updates: Partial<BlockedZone>) => void
+  deleteBlockedZone: (sceneId: string, zoneId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -650,6 +656,51 @@ export const useGameStore = create<GameStore>((set) => ({
                   ...placement,
                 },
               }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Blocked zone actions
+  addBlockedZone: (sceneId, zone) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, blockedZones: [...(s.blockedZones ?? []), zone] }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateBlockedZone: (sceneId, zoneId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? {
+                ...s,
+                blockedZones: (s.blockedZones ?? []).map((z) =>
+                  z.id === zoneId ? { ...z, ...updates } : z
+                ),
+              }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteBlockedZone: (sceneId, zoneId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, blockedZones: (s.blockedZones ?? []).filter((z) => z.id !== zoneId) }
             : s
         ),
         updatedAt: new Date().toISOString(),
