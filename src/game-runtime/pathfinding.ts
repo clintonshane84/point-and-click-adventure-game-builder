@@ -21,17 +21,24 @@ export function findPath(
   fromY: number,
   toX: number,
   toY: number,
+  charWidth = 0,
+  charHeight = 0,
 ): PathPoint[] {
   const cols = Math.ceil(sceneWidth / GRID_CELL)
   const rows = Math.ceil(sceneHeight / GRID_CELL)
 
+  // Inflate obstacles by half character size (Minkowski sum) so the center
+  // of the character never gets closer to a wall than its own half-width/height.
+  const padX = charWidth / 2
+  const padY = charHeight / 2
+
   // Build walkability grid (true = walkable)
   const walkable: boolean[][] = Array.from({ length: rows }, () => new Array(cols).fill(true))
   for (const z of blockedZones) {
-    const c0 = Math.max(0, Math.floor(z.x / GRID_CELL))
-    const c1 = Math.min(cols, Math.ceil((z.x + z.width) / GRID_CELL))
-    const r0 = Math.max(0, Math.floor(z.y / GRID_CELL))
-    const r1 = Math.min(rows, Math.ceil((z.y + z.height) / GRID_CELL))
+    const c0 = Math.max(0, Math.floor((z.x - padX) / GRID_CELL))
+    const c1 = Math.min(cols, Math.ceil((z.x + z.width + padX) / GRID_CELL))
+    const r0 = Math.max(0, Math.floor((z.y - padY) / GRID_CELL))
+    const r1 = Math.min(rows, Math.ceil((z.y + z.height + padY) / GRID_CELL))
     for (let r = r0; r < r1; r++)
       for (let c = c0; c < c1; c++)
         walkable[r][c] = false

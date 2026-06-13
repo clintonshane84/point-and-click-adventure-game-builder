@@ -418,6 +418,8 @@ export class GameRuntime {
         char.x + mc.width / 2,
         char.y + mc.height / 2,
         pos.x, pos.y,
+        mc.width,
+        mc.height,
       )
       if (path.length > 0) {
         char.waypoints = path

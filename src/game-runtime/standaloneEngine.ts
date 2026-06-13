@@ -11,13 +11,14 @@ export function getStandaloneEngineSource(): string {
 
 const GRID_CELL = 16;
 
-function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY) {
+function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY, charWidth=0, charHeight=0) {
   const cols = Math.ceil(sceneWidth / GRID_CELL);
   const rows = Math.ceil(sceneHeight / GRID_CELL);
+  const padX=charWidth/2, padY=charHeight/2;
   const walkable = Array.from({length: rows}, () => new Array(cols).fill(true));
   for (const z of blockedZones) {
-    const c0=Math.max(0,Math.floor(z.x/GRID_CELL)), c1=Math.min(cols,Math.ceil((z.x+z.width)/GRID_CELL));
-    const r0=Math.max(0,Math.floor(z.y/GRID_CELL)), r1=Math.min(rows,Math.ceil((z.y+z.height)/GRID_CELL));
+    const c0=Math.max(0,Math.floor((z.x-padX)/GRID_CELL)), c1=Math.min(cols,Math.ceil((z.x+z.width+padX)/GRID_CELL));
+    const r0=Math.max(0,Math.floor((z.y-padY)/GRID_CELL)), r1=Math.min(rows,Math.ceil((z.y+z.height+padY)/GRID_CELL));
     for (let r=r0;r<r1;r++) for (let c=c0;c<c1;c++) walkable[r][c]=false;
   }
   const cc=(c)=>Math.max(0,Math.min(cols-1,c)), cr=(r)=>Math.max(0,Math.min(rows-1,r));
@@ -320,7 +321,7 @@ export class GameEngine {
     const char=this.state.character, mc=this.project.mainCharacter;
     if (char&&mc) {
       const path=findPath(scene.blockedZones||[],scene.width,scene.height,
-        char.x+mc.width/2, char.y+mc.height/2, pos.x, pos.y);
+        char.x+mc.width/2, char.y+mc.height/2, pos.x, pos.y, mc.width, mc.height);
       if (path.length>0) { char.waypoints=path; char.waypointIndex=0; char.moving=true; }
     }
   }
