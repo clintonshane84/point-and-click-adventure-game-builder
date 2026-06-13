@@ -14,7 +14,7 @@ const GRID_CELL = 16;
 function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY, charWidth=0, charHeight=0) {
   const cols = Math.ceil(sceneWidth / GRID_CELL);
   const rows = Math.ceil(sceneHeight / GRID_CELL);
-  const padX=charWidth/2, padY=charHeight/2;
+  const padX=Math.max(0,charWidth/2-1), padY=Math.max(0,charHeight/2-1);
   const walkable = Array.from({length: rows}, () => new Array(cols).fill(true));
   for (const z of blockedZones) {
     const c0=Math.max(0,Math.floor((z.x-padX)/GRID_CELL)), c1=Math.min(cols,Math.ceil((z.x+z.width+padX)/GRID_CELL));

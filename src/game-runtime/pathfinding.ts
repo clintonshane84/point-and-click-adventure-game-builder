@@ -29,8 +29,8 @@ export function findPath(
 
   // Inflate obstacles by half character size (Minkowski sum) so the center
   // of the character never gets closer to a wall than its own half-width/height.
-  const padX = charWidth / 2
-  const padY = charHeight / 2
+  const padX = Math.max(0, charWidth / 2 - 1)
+  const padY = Math.max(0, charHeight / 2 - 1)
 
   // Build walkability grid (true = walkable)
   const walkable: boolean[][] = Array.from({ length: rows }, () => new Array(cols).fill(true))
