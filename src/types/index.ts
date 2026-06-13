@@ -5,6 +5,7 @@ export type EditorType =
   | 'assets'
   | 'ui'
   | 'sprite'
+  | 'character'
   | 'settings'
   | 'titlescreen'
   | 'stage'
@@ -31,6 +32,35 @@ export interface SceneObject {
   properties: Record<string, string | number | boolean>
 }
 
+export type FacingDirection = 'up' | 'down' | 'left' | 'right'
+
+export interface CharacterAnimation {
+  spriteSheetId: string
+  animationId: string
+}
+
+export interface MainCharacter {
+  id: string
+  name: string
+  description: string
+  width: number
+  height: number
+  defaultFacing: FacingDirection
+  animations: {
+    up: CharacterAnimation | null
+    down: CharacterAnimation | null
+    left: CharacterAnimation | null
+    right: CharacterAnimation | null
+  }
+}
+
+export interface CharacterPlacement {
+  visible: boolean
+  x: number
+  y: number
+  facing: FacingDirection
+}
+
 export interface Scene {
   id: string
   name: string
@@ -39,6 +69,7 @@ export interface Scene {
   backgroundColor: string
   backgroundImageUrl?: string
   objects: SceneObject[]
+  characterPlacement?: CharacterPlacement
 }
 
 // Event types
@@ -250,6 +281,7 @@ export interface GameProject {
   assets: Asset[]
   uiElements: UIElement[]
   spriteSheets: SpriteSheet[]
+  mainCharacter: MainCharacter
   settings: GameSettings
   titleScreen: TitleScreenConfig
   stages: Stage[]

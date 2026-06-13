@@ -696,6 +696,63 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
     ),
   },
 
+  character: {
+    title: 'Character Editor',
+    content: (
+      <>
+        <P>
+          The Character Editor lets you define your game&apos;s <strong>main player character</strong> — their
+          name, sprite size, and which sprite sheet animations play while walking in each direction.
+          You can then place the character&apos;s starting position per scene from the Scene Editor.
+        </P>
+
+        {H('Character info')}
+        <Table
+          rows={[
+            ['Name', "The character's display name (shown in the Scene Editor marker)."],
+            ['Description', 'Optional notes about the character — not shown in-game.'],
+            ['Width / Height', 'Pixel size of the character sprite on screen.'],
+            ['Default Facing', 'The direction the character faces when no animation is playing.'],
+          ]}
+        />
+
+        {H('Walking animations')}
+        <P>
+          Assign one animation from a sprite sheet to each of the four walking directions:
+          <strong> Up</strong>, <strong>Down</strong>, <strong>Left</strong>, and <strong>Right</strong>.
+        </P>
+        <Ul>
+          <Li>Select a sprite sheet (create them first in the <strong>Sprites</strong> editor).</Li>
+          <Li>Then select the specific animation from that sheet for the direction.</Li>
+          <Li>The status badge turns green when an animation is fully assigned.</Li>
+          <Li>Click <strong>✕</strong> on a direction card to clear that assignment.</Li>
+        </Ul>
+
+        {H('Setting the start position per scene')}
+        <P>
+          Each scene can independently define where the character appears:
+        </P>
+        <Ul>
+          <Li>Open the <strong>Scene Editor</strong> and select a scene.</Li>
+          <Li>In the right-hand <strong>Properties</strong> panel, scroll to <strong>Character Start</strong>.</Li>
+          <Li>Toggle the checkbox to enable the character in that scene.</Li>
+          <Li>Set the X / Y position and the initial facing direction.</Li>
+          <Li>A dashed blue marker previews the character placement on the canvas.</Li>
+        </Ul>
+
+        <Tip>
+          Create and name your sprite sheet animations descriptively (e.g. "walk-up", "walk-down")
+          before coming here — it makes selecting them much easier.
+        </Tip>
+
+        <Warn>
+          The character is a single shared definition across all scenes. If you change the sprite
+          size here, the placement markers in all scenes will reflect the new size immediately.
+        </Warn>
+      </>
+    ),
+  },
+
   export: {
     title: 'Export Game',
     content: (

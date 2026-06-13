@@ -18,6 +18,10 @@ import type {
   CursorConfig,
   CursorStateName,
   CursorStateConfig,
+  MainCharacter,
+  CharacterAnimation,
+  FacingDirection,
+  CharacterPlacement,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -75,6 +79,16 @@ const defaultCursorConfig: CursorConfig = {
   activeState: 'default',
 }
 
+const defaultMainCharacter: MainCharacter = {
+  id: 'main-character',
+  name: 'Player',
+  description: '',
+  width: 64,
+  height: 96,
+  defaultFacing: 'down',
+  animations: { up: null, down: null, left: null, right: null },
+}
+
 const defaultProject: GameProject = {
   id: 'project-1',
   name: 'My Adventure Game',
@@ -86,6 +100,7 @@ const defaultProject: GameProject = {
   assets: [],
   uiElements: [],
   spriteSheets: [],
+  mainCharacter: defaultMainCharacter,
   settings: defaultSettings,
   titleScreen: defaultTitleScreen,
   stages: [defaultStage],
@@ -157,6 +172,11 @@ interface GameStore {
   // Cursor actions
   updateCursorState: (stateName: CursorStateName, updates: Partial<CursorStateConfig>) => void
   updateCursorConfig: (updates: Partial<CursorConfig>) => void
+
+  // Main character actions
+  updateMainCharacter: (updates: Partial<MainCharacter>) => void
+  setCharacterAnimation: (direction: FacingDirection, anim: CharacterAnimation | null) => void
+  updateSceneCharacterPlacement: (sceneId: string, placement: Partial<CharacterPlacement>) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -166,7 +186,13 @@ export const useGameStore = create<GameStore>((set) => ({
   setActiveEditor: (editor) => set({ activeEditor: editor }),
 
   loadProject: (project) =>
-    set({ project: { ...project, updatedAt: new Date().toISOString() } }),
+    set({
+      project: {
+        ...project,
+        mainCharacter: project.mainCharacter ?? defaultMainCharacter,
+        updatedAt: new Date().toISOString(),
+      },
+    }),
 
   // Scene actions
   addScene: (scene) =>
@@ -582,6 +608,50 @@ export const useGameStore = create<GameStore>((set) => ({
       project: {
         ...state.project,
         cursorConfig: { ...state.project.cursorConfig, ...updates },
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Main character actions
+  updateMainCharacter: (updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        mainCharacter: { ...state.project.mainCharacter, ...updates },
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  setCharacterAnimation: (direction, anim) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        mainCharacter: {
+          ...state.project.mainCharacter,
+          animations: { ...state.project.mainCharacter.animations, [direction]: anim },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateSceneCharacterPlacement: (sceneId, placement) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? {
+                ...s,
+                characterPlacement: {
+                  visible: s.characterPlacement?.visible ?? false,
+                  x: s.characterPlacement?.x ?? 100,
+                  y: s.characterPlacement?.y ?? 300,
+                  facing: s.characterPlacement?.facing ?? 'down',
+                  ...placement,
+                },
+              }
+            : s
+        ),
         updatedAt: new Date().toISOString(),
       },
     })),

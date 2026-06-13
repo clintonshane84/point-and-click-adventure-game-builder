@@ -13,6 +13,7 @@ import { TitleScreenEditor } from './editors/TitleScreenEditor'
 import { StageEditor } from './editors/StageEditor'
 import { GoalEditor } from './editors/GoalEditor'
 import { CursorEditor } from './editors/CursorEditor'
+import { CharacterEditor } from './editors/CharacterEditor'
 import { PreviewGameManager } from './editors/PreviewGameManager'
 import { ExportGameManager } from './editors/ExportGameManager'
 import { saveProject, autoSave } from './lib/fileSystemStorage'
@@ -46,6 +47,7 @@ function App() {
       case 'stage':       return <StageEditor />
       case 'goal':        return <GoalEditor />
       case 'cursor':      return <CursorEditor />
+      case 'character':   return <CharacterEditor />
       case 'preview':     return <PreviewGameManager />
       case 'export':      return <ExportGameManager />
       default:            return <SceneEditor />

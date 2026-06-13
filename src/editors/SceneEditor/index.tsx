@@ -7,7 +7,7 @@ import {
   User, Box, Crosshair, Image, LayoutTemplate,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { SceneObject, SceneObjectType } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -63,12 +63,15 @@ const OBJECT_TYPES: SceneObjectType[] = ['sprite', 'character', 'item', 'hotspot
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+const FACING_ARROWS: Record<FacingDirection, string> = { up: '▲', down: '▼', left: '◀', right: '▶' }
+
 export function SceneEditor() {
   const {
     project, addScene, deleteScene, setActiveScene,
     addSceneObject, updateSceneObject, deleteSceneObject,
+    updateSceneCharacterPlacement,
   } = useGameStore()
-  const { scenes, activeSceneId, assets } = project
+  const { scenes, activeSceneId, assets, mainCharacter } = project
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? scenes[0]
 
@@ -547,6 +550,33 @@ export function SceneEditor() {
                       />
                     ))}
 
+                  {/* Character start position marker */}
+                  {activeScene.characterPlacement?.visible && (() => {
+                    const cp = activeScene.characterPlacement!
+                    const cw = mainCharacter.width
+                    const ch = mainCharacter.height
+                    return (
+                      <>
+                        <Rect
+                          x={cp.x} y={cp.y}
+                          width={cw} height={ch}
+                          fill="rgba(99,102,241,0.18)"
+                          stroke="#818cf8"
+                          strokeWidth={2}
+                          dash={[5, 3]}
+                          listening={false}
+                        />
+                        <Text
+                          x={cp.x} y={cp.y - 16}
+                          text={`${FACING_ARROWS[cp.facing]} ${mainCharacter.name}`}
+                          fontSize={11}
+                          fill="#a5b4fc"
+                          listening={false}
+                        />
+                      </>
+                    )
+                  })()}
+
                   <Transformer
                     ref={transformerRef}
                     boundBoxFunc={(oldBox, newBox) =>
@@ -747,6 +777,68 @@ export function SceneEditor() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Character start position */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide flex items-center gap-1">
+                  <User size={11} /> Character Start
+                </span>
+                <input
+                  type="checkbox"
+                  checked={activeScene.characterPlacement?.visible ?? false}
+                  onChange={(e) =>
+                    updateSceneCharacterPlacement(activeScene.id, { visible: e.target.checked })
+                  }
+                  title="Show character in this scene"
+                  className="rounded"
+                />
+              </div>
+
+              {activeScene.characterPlacement?.visible && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">X</label>
+                      <input
+                        type="number"
+                        value={activeScene.characterPlacement.x}
+                        onChange={(e) =>
+                          updateSceneCharacterPlacement(activeScene.id, { x: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Y</label>
+                      <input
+                        type="number"
+                        value={activeScene.characterPlacement.y}
+                        onChange={(e) =>
+                          updateSceneCharacterPlacement(activeScene.id, { y: parseFloat(e.target.value) || 0 })
+                        }
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">Facing</label>
+                    <select
+                      value={activeScene.characterPlacement.facing}
+                      onChange={(e) =>
+                        updateSceneCharacterPlacement(activeScene.id, { facing: e.target.value as FacingDirection })
+                      }
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="up">Up</option>
+                      <option value="down">Down</option>
+                      <option value="left">Left</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
