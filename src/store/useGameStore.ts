@@ -97,6 +97,7 @@ interface GameStore {
   project: GameProject
   activeEditor: EditorType
   setActiveEditor: (editor: EditorType) => void
+  loadProject: (project: GameProject) => void
 
   // Scene actions
   addScene: (scene: Scene) => void
@@ -163,6 +164,9 @@ export const useGameStore = create<GameStore>((set) => ({
   activeEditor: 'scene',
 
   setActiveEditor: (editor) => set({ activeEditor: editor }),
+
+  loadProject: (project) =>
+    set({ project: { ...project, updatedAt: new Date().toISOString() } }),
 
   // Scene actions
   addScene: (scene) =>
