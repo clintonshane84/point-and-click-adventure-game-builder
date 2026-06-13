@@ -10,6 +10,8 @@ import { TitleScreenEditor } from './editors/TitleScreenEditor'
 import { StageEditor } from './editors/StageEditor'
 import { GoalEditor } from './editors/GoalEditor'
 import { CursorEditor } from './editors/CursorEditor'
+import { PreviewGameManager } from './editors/PreviewGameManager'
+import { ExportGameManager } from './editors/ExportGameManager'
 
 function App() {
   const activeEditor = useGameStore((s) => s.activeEditor)
@@ -36,6 +38,10 @@ function App() {
         return <GoalEditor />
       case 'cursor':
         return <CursorEditor />
+      case 'preview':
+        return <PreviewGameManager />
+      case 'export':
+        return <ExportGameManager />
       default:
         return <SceneEditor />
     }

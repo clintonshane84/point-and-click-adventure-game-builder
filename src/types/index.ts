@@ -10,6 +10,8 @@ export type EditorType =
   | 'stage'
   | 'goal'
   | 'cursor'
+  | 'preview'
+  | 'export'
 
 // Scene types
 export type SceneObjectType = 'sprite' | 'background' | 'hotspot' | 'character' | 'item'
