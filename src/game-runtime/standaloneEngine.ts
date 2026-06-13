@@ -54,7 +54,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
       open.set(nk,node);
     }
   }
-  if (!endNode) return [{x:toX,y:toY}];
+  if (!endNode) return [];
   const raw=[]; let n=endNode;
   while(n){raw.unshift({x:n.col*GRID_CELL+GRID_CELL/2,y:n.row*GRID_CELL+GRID_CELL/2});n=n.parent;}
   if(raw.length>0) raw[raw.length-1]={x:toX,y:toY};
@@ -73,8 +73,8 @@ function smoothPath(path,walkable,rows,cols) {
 }
 
 function los(a,b,walkable,rows,cols) {
-  let c0=Math.round(a.x/GRID_CELL),r0=Math.round(a.y/GRID_CELL);
-  const c1=Math.round(b.x/GRID_CELL),r1=Math.round(b.y/GRID_CELL);
+  let c0=Math.floor(a.x/GRID_CELL),r0=Math.floor(a.y/GRID_CELL);
+  const c1=Math.floor(b.x/GRID_CELL),r1=Math.floor(b.y/GRID_CELL);
   const dc=Math.abs(c1-c0),dr=Math.abs(r1-r0),sc=c0<c1?1:-1,sr=r0<r1?1:-1;
   let err=dc-dr;
   for(;;){

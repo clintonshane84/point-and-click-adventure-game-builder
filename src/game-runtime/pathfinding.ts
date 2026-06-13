@@ -122,8 +122,7 @@ export function findPath(
   }
 
   if (!endNode) {
-    // No path — go direct (obstacles will be clipped through)
-    return [{ x: toX, y: toY }]
+    return []
   }
 
   // ── Reconstruct ───────────────────────────────────────────────────────────
@@ -163,8 +162,8 @@ function lineOfSight(
   a: PathPoint, b: PathPoint,
   walkable: boolean[][], rows: number, cols: number,
 ): boolean {
-  let c0 = Math.round(a.x / GRID_CELL), r0 = Math.round(a.y / GRID_CELL)
-  const c1 = Math.round(b.x / GRID_CELL), r1 = Math.round(b.y / GRID_CELL)
+  let c0 = Math.floor(a.x / GRID_CELL), r0 = Math.floor(a.y / GRID_CELL)
+  const c1 = Math.floor(b.x / GRID_CELL), r1 = Math.floor(b.y / GRID_CELL)
   const dc = Math.abs(c1 - c0), dr = Math.abs(r1 - r0)
   const sc = c0 < c1 ? 1 : -1, sr = r0 < r1 ? 1 : -1
   let err = dc - dr
