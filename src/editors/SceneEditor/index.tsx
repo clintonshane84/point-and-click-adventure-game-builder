@@ -102,6 +102,16 @@ export function SceneEditor() {
   const bgImage = useHtmlImage(activeScene?.backgroundImageUrl)
   const imageAssets = assets.filter((a) => a.type === 'image')
 
+  // Character sprite preview: load the first frame of the default-facing animation
+  const charFacing = mainCharacter.defaultFacing
+  const charAnimCfg = mainCharacter.animations[charFacing]
+  const charSheet = project.spriteSheets.find((s) => s.id === charAnimCfg?.spriteSheetId)
+  const charAnimDef = charSheet?.animations.find((a) => a.id === charAnimCfg?.animationId)
+  const charStartFrame = charAnimDef?.startFrame ?? 0
+  const charFrameCol = charStartFrame % (charSheet?.cols ?? 1)
+  const charFrameRow = Math.floor(charStartFrame / (charSheet?.cols ?? 1))
+  const charSpriteImage = useHtmlImage(charSheet?.imageUrl)
+
   // ── Delete key ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -557,15 +567,30 @@ export function SceneEditor() {
                     const ch = mainCharacter.height
                     return (
                       <>
-                        <Rect
-                          x={cp.x} y={cp.y}
-                          width={cw} height={ch}
-                          fill="rgba(99,102,241,0.18)"
-                          stroke="#818cf8"
-                          strokeWidth={2}
-                          dash={[5, 3]}
-                          listening={false}
-                        />
+                        {charSpriteImage && charSheet ? (
+                          <KonvaImage
+                            image={charSpriteImage}
+                            crop={{
+                              x: charFrameCol * charSheet.frameWidth,
+                              y: charFrameRow * charSheet.frameHeight,
+                              width: charSheet.frameWidth,
+                              height: charSheet.frameHeight,
+                            }}
+                            x={cp.x} y={cp.y}
+                            width={cw} height={ch}
+                            listening={false}
+                          />
+                        ) : (
+                          <Rect
+                            x={cp.x} y={cp.y}
+                            width={cw} height={ch}
+                            fill="rgba(99,102,241,0.18)"
+                            stroke="#818cf8"
+                            strokeWidth={2}
+                            dash={[5, 3]}
+                            listening={false}
+                          />
+                        )}
                         <Text
                           x={cp.x} y={cp.y - 16}
                           text={`${FACING_ARROWS[cp.facing]} ${mainCharacter.name}`}

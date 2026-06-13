@@ -1,4 +1,18 @@
-import type { GameProject, Scene, SceneObject, EventTrigger, EventAction } from '../types'
+import type {
+  GameProject, Scene, SceneObject, EventTrigger, EventAction,
+  FacingDirection, SpriteSheet, Animation,
+} from '../types'
+
+interface CharacterState {
+  x: number
+  y: number
+  targetX: number | null
+  targetY: number | null
+  facing: FacingDirection
+  moving: boolean
+  animFrame: number
+  animTimer: number   // ms since last frame advance
+}
 
 interface GameState {
   currentSceneId: string
@@ -7,7 +21,10 @@ interface GameState {
   running: boolean
   dialogText: string | null
   dialogCallback: (() => void) | null
+  character: CharacterState | null
 }
+
+const CHAR_SPEED = 250  // scene px / second
 
 export class GameRuntime {
   private canvas: HTMLCanvasElement
@@ -17,6 +34,7 @@ export class GameRuntime {
   private imageCache = new Map<string, HTMLImageElement>()
   private objectVisibility = new Map<string, boolean>()
   private frameId: number | null = null
+  private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
   private boundMouseMove: (e: MouseEvent) => void
 
@@ -39,12 +57,14 @@ export class GameRuntime {
       running: false,
       dialogText: null,
       dialogCallback: null,
+      character: null,
     }
   }
 
   start() {
     if (this.state.running) return
     this.state.running = true
+    this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
     this.loadScene(this.state.currentSceneId)
@@ -69,29 +89,113 @@ export class GameRuntime {
     this.start()
   }
 
+  // ── Scene loading ─────────────────────────────────────────────────────────
+
   private loadScene(sceneId: string) {
     this.state.currentSceneId = sceneId
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
-    // Fire 'enter' events for the scene
-    const enterEvents = this.project.events.filter(
-      (e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled
-    )
-    enterEvents.forEach((ev) => this.executeEvent(ev))
-    // Pre-cache scene images
+
     const scene = this.project.scenes.find((s) => s.id === sceneId)
     if (scene) {
       if (scene.backgroundImageUrl) this.loadImage(scene.backgroundImageUrl)
       scene.objects.forEach((o) => { if (o.imageUrl) this.loadImage(o.imageUrl) })
+
+      // Pre-load character sprite sheets
+      const mc = this.project.mainCharacter
+      if (mc) {
+        for (const dir of ['up', 'down', 'left', 'right'] as FacingDirection[]) {
+          const sheet = this.getCharSheet(dir)
+          if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+        }
+      }
+
+      // Initialize character position from scene placement
+      const cp = scene.characterPlacement
+      if (cp?.visible && mc) {
+        const facing = cp.facing ?? mc.defaultFacing ?? 'down'
+        this.state.character = {
+          x: cp.x,
+          y: cp.y,
+          targetX: null,
+          targetY: null,
+          facing,
+          moving: false,
+          animFrame: this.getAnimStartFrame(facing),
+          animTimer: 0,
+        }
+      } else {
+        this.state.character = null
+      }
     }
+
+    // Fire 'enter' events
+    const enterEvents = this.project.events.filter(
+      (e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled
+    )
+    enterEvents.forEach((ev) => this.executeEvent(ev))
   }
+
+  // ── Render loop ───────────────────────────────────────────────────────────
 
   private renderLoop() {
     if (!this.state.running) return
+    const now = performance.now()
+    const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16
+    this.lastFrameTime = now
+    this.updateCharacter(dt)
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
   }
+
+  // ── Character movement ────────────────────────────────────────────────────
+
+  private updateCharacter(dt: number) {
+    const char = this.state.character
+    if (!char || !char.moving || char.targetX === null || char.targetY === null) return
+
+    const dx = char.targetX - char.x
+    const dy = char.targetY - char.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+
+    if (dist < 3) {
+      char.x = char.targetX
+      char.y = char.targetY
+      char.targetX = null
+      char.targetY = null
+      char.moving = false
+      char.animFrame = this.getAnimStartFrame(char.facing)
+      char.animTimer = 0
+      return
+    }
+
+    // Determine facing from dominant axis
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      char.facing = dx > 0 ? 'right' : 'left'
+    } else {
+      char.facing = dy > 0 ? 'down' : 'up'
+    }
+
+    const step = CHAR_SPEED * (dt / 1000)
+    const ratio = Math.min(step / dist, 1)
+    char.x += dx * ratio
+    char.y += dy * ratio
+
+    // Advance animation frame
+    const animDef = this.getCharAnim(char.facing)
+    if (animDef && animDef.fps > 0) {
+      const frameMs = 1000 / animDef.fps
+      char.animTimer += dt
+      while (char.animTimer >= frameMs) {
+        char.animTimer -= frameMs
+        char.animFrame++
+        if (char.animFrame > animDef.endFrame) char.animFrame = animDef.startFrame
+      }
+    }
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────────
 
   private render() {
     const { canvas, ctx } = this
@@ -139,6 +243,9 @@ export class GameRuntime {
       if (!visible) continue
       this.renderObject(obj)
     }
+
+    // Draw character on top of scene objects
+    this.renderCharacter()
   }
 
   private renderObject(obj: SceneObject) {
@@ -159,7 +266,7 @@ export class GameRuntime {
       sprite: '#4f46e5',
       character: '#7c3aed',
       item: '#d97706',
-      hotspot: 'rgba(99,102,241,0.25)',
+      hotspot: 'rgba(99,102,241,0.15)',
       background: '#1e293b',
     }
     ctx.fillStyle = placeholderColors[obj.type] ?? '#4f46e5'
@@ -174,6 +281,41 @@ export class GameRuntime {
       ctx.fillText(obj.name, obj.x + obj.width / 2, obj.y + obj.height / 2)
     }
     ctx.restore()
+  }
+
+  private renderCharacter() {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const { ctx } = this
+    const cw = mc.width
+    const ch = mc.height
+
+    const sheet = this.getCharSheet(char.facing)
+    const img = sheet ? this.imageCache.get(sheet.imageUrl) : null
+
+    if (img && sheet) {
+      const col = char.animFrame % sheet.cols
+      const row = Math.floor(char.animFrame / sheet.cols)
+      ctx.drawImage(
+        img,
+        col * sheet.frameWidth, row * sheet.frameHeight,
+        sheet.frameWidth, sheet.frameHeight,
+        Math.round(char.x), Math.round(char.y), cw, ch
+      )
+    } else {
+      // Fallback while image loads
+      ctx.save()
+      ctx.fillStyle = 'rgba(99,102,241,0.7)'
+      ctx.fillRect(char.x, char.y, cw, ch)
+      ctx.fillStyle = '#fff'
+      ctx.font = `${Math.min(12, ch * 0.18)}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(mc.name ?? 'Player', char.x + cw / 2, char.y + ch / 2)
+      ctx.restore()
+    }
   }
 
   private renderDialog() {
@@ -219,6 +361,8 @@ export class GameRuntime {
     ctx.fillText('▶ Click to continue', canvas.width - 16, boxY + boxH - 8)
   }
 
+  // ── Input handling ────────────────────────────────────────────────────────
+
   private getScenePos(e: MouseEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect()
     const canvasX = (e.clientX - rect.left) * (this.canvas.width / rect.width)
@@ -245,12 +389,23 @@ export class GameRuntime {
     if (!scene) return
 
     const obj = this.getObjectAt(scene, pos.x, pos.y)
-    if (!obj) return
+    if (obj) {
+      const events = this.project.events.filter(
+        (ev) => ev.sceneId === scene.id && ev.objectId === obj.id && ev.trigger === 'click' && ev.enabled
+      )
+      events.forEach((ev) => this.executeEvent(ev))
+      return
+    }
 
-    const events = this.project.events.filter(
-      (ev) => ev.sceneId === scene.id && ev.objectId === obj.id && ev.trigger === 'click' && ev.enabled
-    )
-    events.forEach((ev) => this.executeEvent(ev))
+    // Nothing clicked — walk character to this position
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (char && mc) {
+      // Center character on click point
+      char.targetX = pos.x - mc.width / 2
+      char.targetY = pos.y - mc.height / 2
+      char.moving = true
+    }
   }
 
   private handleMouseMove(e: MouseEvent) {
@@ -271,6 +426,8 @@ export class GameRuntime {
       .sort((a, b) => b.zIndex - a.zIndex)
       .find((o) => x >= o.x && x <= o.x + o.width && y >= o.y && y <= o.y + o.height) ?? null
   }
+
+  // ── Event / action execution ──────────────────────────────────────────────
 
   private executeEvent(event: EventTrigger) {
     event.actions.forEach((a) => this.executeAction(a))
@@ -314,6 +471,31 @@ export class GameRuntime {
       }
     }
   }
+
+  // ── Sprite sheet helpers ──────────────────────────────────────────────────
+
+  private getCharSheet(facing: FacingDirection): SpriteSheet | null {
+    const mc = this.project.mainCharacter
+    if (!mc) return null
+    const animCfg = mc.animations[facing]
+    if (!animCfg?.spriteSheetId) return null
+    return this.project.spriteSheets?.find((s) => s.id === animCfg.spriteSheetId) ?? null
+  }
+
+  private getCharAnim(facing: FacingDirection): Animation | null {
+    const mc = this.project.mainCharacter
+    if (!mc) return null
+    const animCfg = mc.animations[facing]
+    const sheet = this.getCharSheet(facing)
+    if (!sheet || !animCfg?.animationId) return null
+    return sheet.animations.find((a) => a.id === animCfg.animationId) ?? null
+  }
+
+  private getAnimStartFrame(facing: FacingDirection): number {
+    return this.getCharAnim(facing)?.startFrame ?? 0
+  }
+
+  // ── Image loader ──────────────────────────────────────────────────────────
 
   private loadImage(url: string) {
     if (this.imageCache.has(url)) return
