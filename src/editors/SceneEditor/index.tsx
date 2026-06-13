@@ -340,7 +340,7 @@ export function SceneEditor() {
                 <ChevronDown size={10} />
               </button>
               {showTypeMenu && (
-                <div className="absolute right-0 top-full mt-1 z-30 w-36 bg-gray-900 border border-gray-600 rounded-lg shadow-xl overflow-hidden">
+                <div className="absolute right-0 bottom-full mb-1 z-30 w-36 bg-gray-900 border border-gray-600 rounded-lg shadow-xl overflow-hidden">
                   {OBJECT_TYPES.map((t) => {
                     const cfg = TYPE_CONFIG[t]
                     return (
