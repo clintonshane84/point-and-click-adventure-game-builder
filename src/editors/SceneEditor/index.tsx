@@ -1,26 +1,71 @@
-import { useRef, useState, useCallback } from 'react'
-import { Stage, Layer, Rect, Text, Transformer } from 'react-konva'
+import { useRef, useState, useCallback, useEffect } from 'react'
+import { Stage, Layer, Rect, Image as KonvaImage, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import { Plus, Trash2, MousePointer, Square } from 'lucide-react'
+import { Plus, Trash2, MousePointer, Square, ImageIcon, X, ChevronDown } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
 import type { SceneObject } from '../../types'
 
 type Tool = 'select' | 'add'
 
+// Load a URL into an HTMLImageElement, returning null until loaded
+function useHtmlImage(url: string | undefined): HTMLImageElement | null {
+  const [img, setImg] = useState<HTMLImageElement | null>(null)
+  useEffect(() => {
+    if (!url) { setImg(null); return }
+    let cancelled = false
+    const el = new Image()
+    el.onload = () => { if (!cancelled) setImg(el) }
+    el.onerror = () => { if (!cancelled) setImg(null) }
+    el.src = url
+    return () => { cancelled = true }
+  }, [url])
+  return img
+}
+
 export function SceneEditor() {
   const { project, addScene, deleteScene, setActiveScene, addSceneObject, updateSceneObject, deleteSceneObject } =
     useGameStore()
-  const { scenes, activeSceneId } = project
+  const { scenes, activeSceneId, assets } = project
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? scenes[0]
 
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
   const [tool, setTool] = useState<Tool>('select')
+  const [showBgPicker, setShowBgPicker] = useState(false)
   const transformerRef = useRef<Konva.Transformer>(null)
   const stageRef = useRef<Konva.Stage>(null)
   const selectedShapeRef = useRef<Konva.Rect | null>(null)
+  const bgPickerRef = useRef<HTMLDivElement>(null)
 
   const selectedObj = activeScene?.objects.find((o) => o.id === selectedObjId) ?? null
+
+  // Load background image
+  const bgImage = useHtmlImage(activeScene?.backgroundImageUrl)
+
+  // Close background picker on outside click
+  useEffect(() => {
+    if (!showBgPicker) return
+    const handler = (e: MouseEvent) => {
+      if (bgPickerRef.current && !bgPickerRef.current.contains(e.target as Node)) {
+        setShowBgPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showBgPicker])
+
+  const imageAssets = assets.filter((a) => a.type === 'image')
+
+  const handleSetBgImage = (url: string) => {
+    if (!activeScene) return
+    useGameStore.getState().updateScene(activeScene.id, { backgroundImageUrl: url })
+    setShowBgPicker(false)
+  }
+
+  const handleClearBgImage = () => {
+    if (!activeScene) return
+    useGameStore.getState().updateScene(activeScene.id, { backgroundImageUrl: undefined })
+  }
 
   const handleAddScene = () => {
     const id = `scene-${Date.now()}`
@@ -255,10 +300,9 @@ export function SceneEditor() {
                 scaleX={scaleX}
                 scaleY={scaleY}
                 onClick={handleStageClick}
-                style={{ background: activeScene.backgroundColor }}
               >
                 <Layer>
-                  {/* Background rect */}
+                  {/* Background fill */}
                   <Rect
                     x={0}
                     y={0}
@@ -266,6 +310,19 @@ export function SceneEditor() {
                     height={activeScene.height}
                     fill={activeScene.backgroundColor}
                   />
+
+                  {/* Background image (sits above color fill, below all objects) */}
+                  {bgImage && (
+                    <KonvaImage
+                      image={bgImage}
+                      x={0}
+                      y={0}
+                      width={activeScene.width}
+                      height={activeScene.height}
+                      listening={false}
+                    />
+                  )}
+
                   {[...activeScene.objects]
                     .sort((a, b) => a.zIndex - b.zIndex)
                     .map((obj) =>
@@ -406,17 +463,23 @@ export function SceneEditor() {
             <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide">
               Scene
             </span>
+
+            {/* Scene name */}
             <div>
               <label className="text-xs text-gray-400 block mb-1">Name</label>
               <input
                 type="text"
                 value={activeScene.name}
-                onChange={(e) => useGameStore.getState().updateScene(activeScene.id, { name: e.target.value })}
+                onChange={(e) =>
+                  useGameStore.getState().updateScene(activeScene.id, { name: e.target.value })
+                }
                 className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
               />
             </div>
+
+            {/* Background color */}
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Background</label>
+              <label className="text-xs text-gray-400 block mb-1">Background Color</label>
               <input
                 type="color"
                 value={activeScene.backgroundColor}
@@ -425,6 +488,79 @@ export function SceneEditor() {
                 }
                 className="w-full h-8 bg-gray-700 border border-gray-600 rounded cursor-pointer"
               />
+            </div>
+
+            {/* Background image */}
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Background Image</label>
+
+              {/* Current image preview */}
+              {activeScene.backgroundImageUrl ? (
+                <div className="relative mb-2 rounded overflow-hidden border border-gray-600 group">
+                  <img
+                    src={activeScene.backgroundImageUrl}
+                    alt="Scene background"
+                    className="w-full h-20 object-cover"
+                  />
+                  <button
+                    onClick={handleClearBgImage}
+                    title="Remove background image"
+                    className="absolute top-1 right-1 p-0.5 rounded bg-gray-900/80 text-gray-400 hover:text-red-400 hover:bg-gray-900 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div className="w-full h-12 mb-2 rounded border border-dashed border-gray-600 flex items-center justify-center">
+                  <span className="text-xs text-gray-500">No image set</span>
+                </div>
+              )}
+
+              {/* Picker trigger */}
+              <div className="relative" ref={bgPickerRef}>
+                <button
+                  onClick={() => setShowBgPicker((v) => !v)}
+                  className="w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded text-xs bg-gray-700 border border-gray-600 hover:bg-gray-600 text-gray-300 transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <ImageIcon size={12} />
+                    {activeScene.backgroundImageUrl ? 'Change image' : 'Choose image'}
+                  </span>
+                  <ChevronDown size={12} className={showBgPicker ? 'rotate-180' : ''} />
+                </button>
+
+                {/* Asset picker dropdown */}
+                {showBgPicker && (
+                  <div className="absolute bottom-full mb-1 left-0 right-0 z-20 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden">
+                    {imageAssets.length === 0 ? (
+                      <div className="px-3 py-4 text-center">
+                        <ImageIcon size={20} className="text-gray-600 mx-auto mb-1" />
+                        <p className="text-xs text-gray-500">No images imported yet.</p>
+                        <p className="text-xs text-gray-600 mt-0.5">
+                          Add images in the Assets Manager.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto">
+                        {imageAssets.map((asset) => (
+                          <button
+                            key={asset.id}
+                            onClick={() => handleSetBgImage(asset.url)}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-gray-700 transition-colors text-left"
+                          >
+                            <img
+                              src={asset.url}
+                              alt={asset.name}
+                              className="w-10 h-7 object-cover rounded border border-gray-600 shrink-0"
+                            />
+                            <span className="text-xs text-gray-300 truncate">{asset.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
