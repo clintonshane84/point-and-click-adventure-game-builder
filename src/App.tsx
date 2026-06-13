@@ -12,6 +12,7 @@ import { GoalEditor } from './editors/GoalEditor'
 import { CursorEditor } from './editors/CursorEditor'
 import { PreviewGameManager } from './editors/PreviewGameManager'
 import { ExportGameManager } from './editors/ExportGameManager'
+import { HelpButton } from './components/HelpButton'
 
 function App() {
   const activeEditor = useGameStore((s) => s.activeEditor)
@@ -51,6 +52,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-gray-950">
       <NavigationSidebar />
       <main className="flex-1 overflow-hidden">{renderEditor()}</main>
+      <HelpButton />
     </div>
   )
 }
