@@ -29,6 +29,7 @@ export interface SceneObject {
   imageUrl?: string
   spriteSheetId?: string
   frameIndex?: number
+  npcId?: string
   zIndex: number
   visible: boolean
   properties: Record<string, string | number | boolean>
@@ -64,6 +65,21 @@ export interface CharacterAnimation {
 }
 
 export interface MainCharacter {
+  id: string
+  name: string
+  description: string
+  width: number
+  height: number
+  defaultFacing: FacingDirection
+  animations: {
+    up: CharacterAnimation | null
+    down: CharacterAnimation | null
+    left: CharacterAnimation | null
+    right: CharacterAnimation | null
+  }
+}
+
+export interface NpcCharacter {
   id: string
   name: string
   description: string
@@ -308,6 +324,7 @@ export interface GameProject {
   uiElements: UIElement[]
   spriteSheets: SpriteSheet[]
   mainCharacter: MainCharacter
+  npcs: NpcCharacter[]
   settings: GameSettings
   titleScreen: TitleScreenConfig
   stages: Stage[]

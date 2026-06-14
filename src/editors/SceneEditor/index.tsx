@@ -9,7 +9,7 @@ import {
 import { useGameStore } from '../../store/useGameStore'
 import { useAiStore } from '../../store/useAiStore'
 import { AiGenerateModal } from '../../components/AiGenerateModal'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ export function SceneEditor() {
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? scenes[0]
 
-  // Preloaded sprite sheet images for the canvas preview
+  // Preloaded sprite sheet images for the canvas preview (covers scene objects and NPC sprites)
   const [spriteImages, setSpriteImages] = useState<Map<string, HTMLImageElement>>(new Map())
   useEffect(() => {
     project.spriteSheets.forEach((sheet) => {
@@ -736,12 +736,27 @@ export function SceneEditor() {
                       const cfg = TYPE_CONFIG[obj.type]
                       const isSelected = obj.id === selectedObjId
 
-                      // Resolve sprite sheet frame if assigned
-                      const sheet = obj.spriteSheetId
+                      // Resolve NPC sprite if this is a character object with an npcId
+                      let sheet = obj.spriteSheetId
                         ? project.spriteSheets.find((s) => s.id === obj.spriteSheetId) ?? null
                         : null
+                      let fi = obj.frameIndex ?? 0
+
+                      if (!sheet && obj.type === 'character' && obj.npcId) {
+                        const npc = (project.npcs ?? []).find((n: NpcCharacter) => n.id === obj.npcId)
+                        if (npc) {
+                          const facingAnim = npc.animations[npc.defaultFacing]
+                          if (facingAnim?.spriteSheetId) {
+                            sheet = project.spriteSheets.find((s) => s.id === facingAnim.spriteSheetId) ?? null
+                            if (sheet && facingAnim.animationId) {
+                              const animDef = sheet.animations.find((a) => a.id === facingAnim.animationId)
+                              fi = animDef?.startFrame ?? 0
+                            }
+                          }
+                        }
+                      }
+
                       const sheetImg = sheet ? spriteImages.get(sheet.imageUrl) ?? null : null
-                      const fi = obj.frameIndex ?? 0
                       const col = fi % (sheet?.cols ?? 1)
                       const row = Math.floor(fi / (sheet?.cols ?? 1))
 
@@ -1275,6 +1290,26 @@ export function SceneEditor() {
                     </div>
                   )
                 })()}
+              </div>
+            )}
+
+            {/* NPC picker — available for character type objects */}
+            {selectedObj.type === 'character' && (
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">NPC Character</label>
+                <select
+                  value={selectedObj.npcId ?? ''}
+                  onChange={(e) => updateSceneObject(activeScene.id, selectedObj.id, { npcId: e.target.value || undefined })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">— none —</option>
+                  {(project.npcs ?? []).map((npc: NpcCharacter) => (
+                    <option key={npc.id} value={npc.id}>{npc.name}</option>
+                  ))}
+                </select>
+                {(project.npcs ?? []).length === 0 && (
+                  <p className="text-xs text-gray-600 mt-1 italic">Add NPCs in the Characters editor first.</p>
+                )}
               </div>
             )}
 

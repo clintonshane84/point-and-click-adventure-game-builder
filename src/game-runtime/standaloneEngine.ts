@@ -159,6 +159,13 @@ export class GameEngine {
           const sh = this._getCharSheet(dir); if (sh?.imageUrl) this._loadImage(sh.imageUrl);
         });
       }
+      for(const npc of (this.project.npcs||[])){
+        ['up','down','left','right'].forEach(dir=>{
+          const a=npc.animations[dir]; if(a?.spriteSheetId){
+            const sh=this.project.spriteSheets?.find(s=>s.id===a.spriteSheetId); if(sh?.imageUrl) this._loadImage(sh.imageUrl);
+          }
+        });
+      }
       const cp = scene.characterPlacement;
       if (cp?.visible && mc) {
         const facing = cp.facing || mc.defaultFacing || 'down';
@@ -289,6 +296,24 @@ export class GameEngine {
         const fi=obj.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
         ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,obj.x,obj.y,obj.width,obj.height);
         ctx.restore(); continue;
+      }
+      if(obj.type==='character'&&obj.npcId){
+        const npc=(this.project.npcs||[]).find(n=>n.id===obj.npcId);
+        if(npc){
+          const fa=npc.animations[npc.defaultFacing];
+          if(fa?.spriteSheetId){
+            const nsh=this.project.spriteSheets?.find(s=>s.id===fa.spriteSheetId);
+            if(nsh){
+              const nim=this.imageCache.get(nsh.imageUrl);
+              if(nim){
+                const adef=nsh.animations.find(a=>a.id===fa.animationId);
+                const fi=adef?.startFrame??0,col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
+                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,obj.x,obj.y,obj.width,obj.height);
+                ctx.restore(); continue;
+              }
+            }
+          }
+        }
       }
       const img=obj.imageUrl?this.imageCache.get(obj.imageUrl):null;
       if(img){

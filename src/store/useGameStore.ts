@@ -19,6 +19,7 @@ import type {
   CursorStateName,
   CursorStateConfig,
   MainCharacter,
+  NpcCharacter,
   CharacterAnimation,
   FacingDirection,
   CharacterPlacement,
@@ -103,6 +104,7 @@ const defaultProject: GameProject = {
   uiElements: [],
   spriteSheets: [],
   mainCharacter: defaultMainCharacter,
+  npcs: [],
   settings: defaultSettings,
   titleScreen: defaultTitleScreen,
   stages: [defaultStage],
@@ -180,6 +182,12 @@ interface GameStore {
   setCharacterAnimation: (direction: FacingDirection, anim: CharacterAnimation | null) => void
   updateSceneCharacterPlacement: (sceneId: string, placement: Partial<CharacterPlacement>) => void
 
+  // NPC actions
+  addNpc: (npc: NpcCharacter) => void
+  updateNpc: (id: string, updates: Partial<NpcCharacter>) => void
+  deleteNpc: (id: string) => void
+  setNpcAnimation: (npcId: string, direction: FacingDirection, anim: CharacterAnimation | null) => void
+
   // Blocked zone (pathfinding) actions
   addBlockedZone: (sceneId: string, zone: BlockedZone) => void
   updateBlockedZone: (sceneId: string, zoneId: string, updates: Partial<BlockedZone>) => void
@@ -202,6 +210,7 @@ export const useGameStore = create<GameStore>((set) => ({
       project: {
         ...project,
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
+        npcs: project.npcs ?? [],
         updatedAt: new Date().toISOString(),
       },
     }),
@@ -752,6 +761,47 @@ export const useGameStore = create<GameStore>((set) => ({
           s.id === sceneId
             ? { ...s, scaleZones: (s.scaleZones ?? []).filter((z) => z.id !== zoneId) }
             : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // NPC actions
+  addNpc: (npc) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: [...(state.project.npcs ?? []), npc],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateNpc: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: (state.project.npcs ?? []).map((n) => (n.id === id ? { ...n, ...updates } : n)),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteNpc: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: (state.project.npcs ?? []).filter((n) => n.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  setNpcAnimation: (npcId, direction, anim) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: (state.project.npcs ?? []).map((n) =>
+          n.id === npcId
+            ? { ...n, animations: { ...n.animations, [direction]: anim } }
+            : n
         ),
         updatedAt: new Date().toISOString(),
       },

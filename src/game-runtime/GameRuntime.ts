@@ -1,6 +1,6 @@
 import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
-  FacingDirection, SpriteSheet, Animation,
+  FacingDirection, SpriteSheet, Animation, NpcCharacter,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -123,6 +123,17 @@ export class GameRuntime {
         for (const dir of ['up', 'down', 'left', 'right'] as FacingDirection[]) {
           const sheet = this.getCharSheet(dir)
           if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+        }
+      }
+
+      // Pre-load NPC sprite sheets
+      for (const npc of (this.project.npcs ?? [])) {
+        for (const dir of ['up', 'down', 'left', 'right'] as FacingDirection[]) {
+          const animCfg = npc.animations[dir]
+          if (animCfg?.spriteSheetId) {
+            const sheet = this.project.spriteSheets?.find((s) => s.id === animCfg.spriteSheetId)
+            if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+          }
         }
       }
 
@@ -387,6 +398,34 @@ export class GameRuntime {
           )
           ctx.restore()
           return
+        }
+      }
+    }
+
+    // Render NPC sprite for character-type objects
+    if (obj.type === 'character' && obj.npcId) {
+      const npc = (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === obj.npcId)
+      if (npc) {
+        const facingAnim = npc.animations[npc.defaultFacing]
+        if (facingAnim?.spriteSheetId) {
+          const sheet = this.project.spriteSheets?.find((s) => s.id === facingAnim.spriteSheetId)
+          if (sheet) {
+            const img = this.imageCache.get(sheet.imageUrl)
+            if (img) {
+              const animDef = sheet.animations.find((a) => a.id === facingAnim.animationId)
+              const fi = animDef?.startFrame ?? 0
+              const col = fi % sheet.cols
+              const row = Math.floor(fi / sheet.cols)
+              ctx.drawImage(
+                img,
+                col * sheet.frameWidth, row * sheet.frameHeight,
+                sheet.frameWidth, sheet.frameHeight,
+                obj.x, obj.y, obj.width, obj.height,
+              )
+              ctx.restore()
+              return
+            }
+          }
         }
       }
     }
