@@ -1,6 +1,7 @@
 import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
-  FacingDirection, SpriteSheet, Animation,
+  FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
+  CinematicCompletionAction,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -14,6 +15,31 @@ interface CharacterState {
   moving: boolean
   animFrame: number
   animTimer: number   // ms since last frame advance
+  scale: number       // current visual scale (lerps toward targetScale)
+  targetScale: number
+  speedMult: number   // current speed multiplier (lerps toward targetSpeedMult)
+  targetSpeedMult: number
+}
+
+type CinematicMode =
+  | 'walking_main'   // waiting for main character to finish walk
+  | 'walking_npc'    // waiting for NPC to reach target
+  | 'waiting'        // countdown timer
+  | 'action'         // showing action label countdown
+  | 'waiting_dialog' // waiting for dialog click
+
+interface CinematicPlayState {
+  steps: CinematicStep[]
+  stepIndex: number
+  mode: CinematicMode | null
+  waitMs: number
+  npcOverrides: Map<string, { x: number; y: number }>
+  npcTargets: Map<string, { x: number; y: number }>
+  activeNpcId: string | null
+  actionText: string | null
+  actionTimer: number
+  completionAction: CinematicCompletionAction
+  completionValue: string
 }
 
 interface GameState {
@@ -24,6 +50,8 @@ interface GameState {
   dialogText: string | null
   dialogCallback: (() => void) | null
   character: CharacterState | null
+  activeHotspots: Set<string>
+  cinematic: CinematicPlayState | null
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -60,6 +88,8 @@ export class GameRuntime {
       dialogText: null,
       dialogCallback: null,
       character: null,
+      activeHotspots: new Set(),
+      cinematic: null,
     }
   }
 
@@ -95,6 +125,7 @@ export class GameRuntime {
 
   private loadScene(sceneId: string) {
     this.state.currentSceneId = sceneId
+    this.state.activeHotspots = new Set()
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
@@ -102,7 +133,13 @@ export class GameRuntime {
     const scene = this.project.scenes.find((s) => s.id === sceneId)
     if (scene) {
       if (scene.backgroundImageUrl) this.loadImage(scene.backgroundImageUrl)
-      scene.objects.forEach((o) => { if (o.imageUrl) this.loadImage(o.imageUrl) })
+      scene.objects.forEach((o) => {
+        if (o.imageUrl) this.loadImage(o.imageUrl)
+        if (o.spriteSheetId) {
+          const sheet = this.project.spriteSheets?.find((s) => s.id === o.spriteSheetId)
+          if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+        }
+      })
 
       // Pre-load character sprite sheets
       const mc = this.project.mainCharacter
@@ -110,6 +147,17 @@ export class GameRuntime {
         for (const dir of ['up', 'down', 'left', 'right'] as FacingDirection[]) {
           const sheet = this.getCharSheet(dir)
           if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+        }
+      }
+
+      // Pre-load NPC sprite sheets
+      for (const npc of (this.project.npcs ?? [])) {
+        for (const dir of ['up', 'down', 'left', 'right'] as FacingDirection[]) {
+          const animCfg = npc.animations[dir]
+          if (animCfg?.spriteSheetId) {
+            const sheet = this.project.spriteSheets?.find((s) => s.id === animCfg.spriteSheetId)
+            if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+          }
         }
       }
 
@@ -126,17 +174,21 @@ export class GameRuntime {
           moving: false,
           animFrame: this.getAnimStartFrame(facing),
           animTimer: 0,
+          scale: 1,
+          targetScale: 1,
+          speedMult: 1,
+          targetSpeedMult: 1,
         }
       } else {
         this.state.character = null
       }
     }
 
-    // Fire 'enter' events
-    const enterEvents = this.project.events.filter(
-      (e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled
-    )
-    enterEvents.forEach((ev) => this.executeEvent(ev))
+    // Fire scene-level 'enter' events — skip hotspot-bound events (those fire via zone detection)
+    const hotspotIds = new Set(scene?.objects.filter((o) => o.type === 'hotspot').map((o) => o.id) ?? [])
+    this.project.events
+      .filter((e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled && !hotspotIds.has(e.objectId))
+      .forEach((ev) => this.executeEvent(ev))
   }
 
   // ── Render loop ───────────────────────────────────────────────────────────
@@ -147,8 +199,303 @@ export class GameRuntime {
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16
     this.lastFrameTime = now
     this.updateCharacter(dt)
+    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+    if (scene) {
+      this.checkHotspots(scene)
+      this.checkScaleZones(scene)
+    }
+    if (this.state.cinematic) this.updateCinematic(dt)
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
+  }
+
+  // ── Hotspot zone detection ────────────────────────────────────────────────
+
+  private checkHotspots(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    // Use character's foot position (bottom-center) for zone detection
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    for (const obj of scene.objects) {
+      if (obj.type !== 'hotspot') continue
+      const vis = this.objectVisibility.has(obj.id)
+        ? this.objectVisibility.get(obj.id)!
+        : obj.visible
+      if (!vis) continue
+
+      const inside =
+        fx >= obj.x && fx <= obj.x + obj.width &&
+        fy >= obj.y && fy <= obj.y + obj.height
+
+      const wasInside = this.state.activeHotspots.has(obj.id)
+
+      if (inside && !wasInside) {
+        this.state.activeHotspots.add(obj.id)
+        this.project.events
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'enter' && e.enabled)
+          .forEach((ev) => this.executeEvent(ev))
+      } else if (!inside && wasInside) {
+        this.state.activeHotspots.delete(obj.id)
+        this.project.events
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'exit' && e.enabled)
+          .forEach((ev) => this.executeEvent(ev))
+      }
+    }
+  }
+
+  // ── Scale zone detection ──────────────────────────────────────────────────
+
+  private checkScaleZones(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    let targetScale = 1
+    let targetSpeedMult = 1
+
+    for (const zone of (scene.scaleZones ?? [])) {
+      if (fx >= zone.x && fx <= zone.x + zone.width &&
+          fy >= zone.y && fy <= zone.y + zone.height) {
+        targetScale = zone.scale
+        targetSpeedMult = zone.speedMultiplier
+        break
+      }
+    }
+
+    char.targetScale = targetScale
+    char.targetSpeedMult = targetSpeedMult
+  }
+
+  // ── Cinematic execution ───────────────────────────────────────────────────
+
+  private playCinematic(cinematicId: string) {
+    const cinematic = (this.project.cinematics ?? []).find((c) => c.id === cinematicId)
+    if (!cinematic || cinematic.steps.length === 0) return
+    // Load the cinematic's scene if needed
+    if (cinematic.sceneId && cinematic.sceneId !== this.state.currentSceneId) {
+      this.loadScene(cinematic.sceneId)
+    }
+    this.state.cinematic = {
+      steps: cinematic.steps,
+      stepIndex: 0,
+      mode: null,
+      waitMs: 0,
+      npcOverrides: new Map(),
+      npcTargets: new Map(),
+      activeNpcId: null,
+      actionText: null,
+      actionTimer: 0,
+      completionAction: cinematic.completionAction,
+      completionValue: cinematic.completionValue,
+    }
+    this.executeCinematicStep(cinematic.steps[0])
+  }
+
+  private executeCinematicStep(step: CinematicStep) {
+    const cine = this.state.cinematic
+    if (!cine) return
+    cine.actionText = null
+    cine.activeNpcId = null
+
+    switch (step.type) {
+      case 'walk_to': {
+        if (!step.characterId || step.characterId === 'main-character') {
+          // Move main character via pathfinding
+          const char = this.state.character
+          const mc = this.project.mainCharacter
+          const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+          if (char && mc && scene) {
+            const path = findPath(
+              scene.blockedZones ?? [], scene.width, scene.height,
+              char.x + mc.width / 2, char.y + mc.height / 2,
+              step.targetX ?? 0, step.targetY ?? 0,
+              mc.width, mc.height,
+            )
+            if (path.length > 0) {
+              char.waypoints = path
+              char.waypointIndex = 0
+              char.moving = true
+            }
+          }
+          cine.mode = 'walking_main'
+        } else {
+          // Move NPC linearly
+          const npcId = step.characterId
+          const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+          const npcObj = scene?.objects.find((o) => o.type === 'character' && o.npcId === npcId)
+          const start = cine.npcOverrides.get(npcId) ?? { x: npcObj?.x ?? 0, y: npcObj?.y ?? 0 }
+          cine.npcOverrides.set(npcId, { ...start })
+          cine.npcTargets.set(npcId, { x: step.targetX ?? 0, y: step.targetY ?? 0 })
+          cine.activeNpcId = npcId
+          cine.mode = 'walking_npc'
+        }
+        break
+      }
+      case 'talk': {
+        const npc = step.characterId && step.characterId !== 'main-character'
+          ? (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === step.characterId)
+          : null
+        const speaker = npc?.name ?? this.project.mainCharacter.name ?? 'Player'
+        this.state.dialogText = `[${speaker}]: ${step.text ?? ''}`
+        this.state.dialogCallback = () => this.advanceCinematicStep()
+        cine.mode = 'waiting_dialog'
+        break
+      }
+      case 'show_dialog': {
+        this.state.dialogText = step.text ?? ''
+        this.state.dialogCallback = () => this.advanceCinematicStep()
+        cine.mode = 'waiting_dialog'
+        break
+      }
+      case 'action': {
+        const npc = step.characterId && step.characterId !== 'main-character'
+          ? (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === step.characterId)
+          : null
+        const actor = npc?.name ?? this.project.mainCharacter.name ?? 'Player'
+        cine.actionText = `${actor} ${step.actionLabel ?? 'performs action'}`
+        cine.actionTimer = 2000
+        cine.mode = 'action'
+        break
+      }
+      case 'wait': {
+        cine.waitMs = (step.duration ?? 1) * 1000
+        cine.mode = 'waiting'
+        break
+      }
+      case 'set_variable': {
+        if (step.variable) {
+          const i = step.variable.indexOf('=')
+          if (i !== -1) {
+            this.state.variables[step.variable.slice(0, i).trim()] = step.variable.slice(i + 1).trim()
+          }
+        }
+        this.advanceCinematicStep()
+        break
+      }
+      case 'play_sound': {
+        // Sound playback not yet implemented in runtime
+        this.advanceCinematicStep()
+        break
+      }
+    }
+  }
+
+  private advanceCinematicStep() {
+    const cine = this.state.cinematic
+    if (!cine) return
+    cine.stepIndex++
+    if (cine.stepIndex >= cine.steps.length) {
+      this.completeCinematic()
+      return
+    }
+    this.executeCinematicStep(cine.steps[cine.stepIndex])
+  }
+
+  private completeCinematic() {
+    const cine = this.state.cinematic
+    if (!cine) return
+    const { completionAction, completionValue } = cine
+    this.state.cinematic = null
+    switch (completionAction) {
+      case 'navigate_scene': {
+        const scene = this.project.scenes.find((s) => s.id === completionValue || s.name === completionValue)
+        if (scene) this.loadScene(scene.id)
+        break
+      }
+      case 'show_dialog': {
+        this.state.dialogText = completionValue
+        break
+      }
+      case 'set_variable': {
+        const i = completionValue.indexOf('=')
+        if (i !== -1) {
+          this.state.variables[completionValue.slice(0, i).trim()] = completionValue.slice(i + 1).trim()
+        }
+        break
+      }
+      case 'return_to_game':
+      default:
+        break
+    }
+  }
+
+  private updateCinematic(dt: number) {
+    const cine = this.state.cinematic
+    if (!cine || cine.mode === null) return
+
+    switch (cine.mode) {
+      case 'walking_main': {
+        const char = this.state.character
+        if (!char || !char.moving) this.advanceCinematicStep()
+        break
+      }
+      case 'walking_npc': {
+        const npcId = cine.activeNpcId
+        if (!npcId) { this.advanceCinematicStep(); break }
+        const pos = cine.npcOverrides.get(npcId)
+        const target = cine.npcTargets.get(npcId)
+        if (!pos || !target) { this.advanceCinematicStep(); break }
+        const dx = target.x - pos.x
+        const dy = target.y - pos.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        const step = 150 * (dt / 1000)
+        if (dist <= step) {
+          pos.x = target.x
+          pos.y = target.y
+          this.advanceCinematicStep()
+        } else {
+          pos.x += (dx / dist) * step
+          pos.y += (dy / dist) * step
+        }
+        break
+      }
+      case 'waiting': {
+        cine.waitMs -= dt
+        if (cine.waitMs <= 0) this.advanceCinematicStep()
+        break
+      }
+      case 'action': {
+        cine.actionTimer -= dt
+        if (cine.actionTimer <= 0) {
+          cine.actionText = null
+          this.advanceCinematicStep()
+        }
+        break
+      }
+      case 'waiting_dialog':
+        break  // handled by dialogCallback
+    }
+  }
+
+  private renderActionLabel() {
+    const cine = this.state.cinematic
+    if (!cine?.actionText) return
+    const { canvas, ctx } = this
+    const text = cine.actionText
+    const fontSize = 20
+    ctx.font = `bold ${fontSize}px sans-serif`
+    const w = ctx.measureText(text).width + 32
+    const h = 44
+    const x = (canvas.width - w) / 2
+    const y = 32
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 8)
+    ctx.fill()
+    ctx.strokeStyle = '#f97316'
+    ctx.lineWidth = 2
+    ctx.stroke()
+    ctx.fillStyle = '#fed7aa'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, canvas.width / 2, y + h / 2)
   }
 
   // ── Character movement ────────────────────────────────────────────────────
@@ -156,7 +503,14 @@ export class GameRuntime {
   private updateCharacter(dt: number) {
     const char = this.state.character
     const mc = this.project.mainCharacter
-    if (!char || !char.moving || !mc) return
+    if (!char || !mc) return
+
+    // Smooth lerp toward zone target scale and speed
+    const lerpFactor = Math.min(1, dt * 3 / 1000)
+    char.scale += (char.targetScale - char.scale) * lerpFactor
+    char.speedMult += (char.targetSpeedMult - char.speedMult) * lerpFactor
+
+    if (!char.moving) return
 
     const target = char.waypoints[char.waypointIndex]
     if (!target) { char.moving = false; return }
@@ -188,7 +542,7 @@ export class GameRuntime {
       char.facing = dy > 0 ? 'down' : 'up'
     }
 
-    const step = CHAR_SPEED * (dt / 1000)
+    const step = CHAR_SPEED * char.speedMult * (dt / 1000)
     const ratio = Math.min(step / dist, 1)
     char.x += dx * ratio
     char.y += dy * ratio
@@ -234,6 +588,7 @@ export class GameRuntime {
     ctx.restore()
 
     if (this.state.dialogText) this.renderDialog()
+    if (this.state.cinematic?.actionText) this.renderActionLabel()
   }
 
   private renderScene(scene: Scene) {
@@ -247,22 +602,93 @@ export class GameRuntime {
     }
 
     const objects = [...scene.objects].sort((a, b) => a.zIndex - b.zIndex)
+
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    // Character's depth in the scene = bottom edge of the character (feet Y).
+    // Objects with zIndex greater than this value render in front of the character.
+    const charDepth = char && mc ? char.y + mc.height : null
+
+    let charDrawn = false
     for (const obj of objects) {
       const visible = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
         : obj.visible
       if (!visible) continue
+
+      // Insert character draw before the first object whose z-index exceeds charDepth
+      if (!charDrawn && charDepth !== null && obj.zIndex > charDepth) {
+        this.renderCharacter()
+        charDrawn = true
+      }
+
       this.renderObject(obj)
     }
 
-    // Draw character on top of scene objects
-    this.renderCharacter()
+    if (!charDrawn) this.renderCharacter()
   }
 
   private renderObject(obj: SceneObject) {
     const { ctx } = this
     ctx.save()
     ctx.globalAlpha = obj.opacity
+
+    // Apply cinematic NPC position override
+    const npcOverride = (obj.type === 'character' && obj.npcId && this.state.cinematic)
+      ? this.state.cinematic.npcOverrides.get(obj.npcId)
+      : undefined
+    if (npcOverride) {
+      // Temporarily patch obj for rendering (shadow copy to avoid mutation)
+      obj = { ...obj, x: npcOverride.x, y: npcOverride.y }
+    }
+
+    if (obj.spriteSheetId) {
+      const sheet = this.project.spriteSheets?.find((s) => s.id === obj.spriteSheetId)
+      if (sheet) {
+        const img = this.imageCache.get(sheet.imageUrl)
+        if (img) {
+          const fi = obj.frameIndex ?? 0
+          const col = fi % sheet.cols
+          const row = Math.floor(fi / sheet.cols)
+          ctx.drawImage(
+            img,
+            col * sheet.frameWidth, row * sheet.frameHeight,
+            sheet.frameWidth, sheet.frameHeight,
+            obj.x, obj.y, obj.width, obj.height,
+          )
+          ctx.restore()
+          return
+        }
+      }
+    }
+
+    // Render NPC sprite for character-type objects
+    if (obj.type === 'character' && obj.npcId) {
+      const npc = (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === obj.npcId)
+      if (npc) {
+        const facingAnim = npc.animations[npc.defaultFacing]
+        if (facingAnim?.spriteSheetId) {
+          const sheet = this.project.spriteSheets?.find((s) => s.id === facingAnim.spriteSheetId)
+          if (sheet) {
+            const img = this.imageCache.get(sheet.imageUrl)
+            if (img) {
+              const animDef = sheet.animations.find((a) => a.id === facingAnim.animationId)
+              const fi = animDef?.startFrame ?? 0
+              const col = fi % sheet.cols
+              const row = Math.floor(fi / sheet.cols)
+              ctx.drawImage(
+                img,
+                col * sheet.frameWidth, row * sheet.frameHeight,
+                sheet.frameWidth, sheet.frameHeight,
+                obj.x, obj.y, obj.width, obj.height,
+              )
+              ctx.restore()
+              return
+            }
+          }
+        }
+      }
+    }
 
     if (obj.imageUrl) {
       const img = this.imageCache.get(obj.imageUrl)
@@ -303,6 +729,13 @@ export class GameRuntime {
     const cw = mc.width
     const ch = mc.height
 
+    // Scale character from feet anchor point
+    const scale = char.scale ?? 1
+    const scaledW = cw * scale
+    const scaledH = ch * scale
+    const renderX = Math.round(char.x + (cw - scaledW) / 2)
+    const renderY = Math.round(char.y + ch - scaledH)
+
     const sheet = this.getCharSheet(char.facing)
     const img = sheet ? this.imageCache.get(sheet.imageUrl) : null
 
@@ -313,18 +746,17 @@ export class GameRuntime {
         img,
         col * sheet.frameWidth, row * sheet.frameHeight,
         sheet.frameWidth, sheet.frameHeight,
-        Math.round(char.x), Math.round(char.y), cw, ch
+        renderX, renderY, scaledW, scaledH
       )
     } else {
-      // Fallback while image loads
       ctx.save()
       ctx.fillStyle = 'rgba(99,102,241,0.7)'
-      ctx.fillRect(char.x, char.y, cw, ch)
+      ctx.fillRect(renderX, renderY, scaledW, scaledH)
       ctx.fillStyle = '#fff'
-      ctx.font = `${Math.min(12, ch * 0.18)}px sans-serif`
+      ctx.font = `${Math.min(12, scaledH * 0.18)}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(mc.name ?? 'Player', char.x + cw / 2, char.y + ch / 2)
+      ctx.fillText(mc.name ?? 'Player', renderX + scaledW / 2, renderY + scaledH / 2)
       ctx.restore()
     }
   }
@@ -441,6 +873,7 @@ export class GameRuntime {
   private getObjectAt(scene: Scene, x: number, y: number): SceneObject | null {
     return [...scene.objects]
       .filter((o) => {
+        if (o.type === 'hotspot') return false   // hotspots don't intercept clicks or cursor
         const vis = this.objectVisibility.has(o.id) ? this.objectVisibility.get(o.id)! : o.visible
         return vis
       })
@@ -488,6 +921,10 @@ export class GameRuntime {
         if (asset?.url) {
           new Audio(asset.url).play().catch(() => {})
         }
+        break
+      }
+      case 'play_cinematic': {
+        this.playCinematic(action.value)
         break
       }
     }

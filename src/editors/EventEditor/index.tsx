@@ -28,6 +28,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   hide_object: 'Hide Object',
   play_animation: 'Play Animation',
   stop_animation: 'Stop Animation',
+  play_cinematic: 'Play Cinematic',
 }
 
 interface EventFormState {
@@ -38,6 +39,7 @@ interface EventFormState {
 export function EventEditor() {
   const { project, addEvent, updateEvent, deleteEvent } = useGameStore()
   const { scenes, events } = project
+  const cinematics = project.cinematics ?? []
 
   const [selectedSceneId, setSelectedSceneId] = useState(scenes[0]?.id ?? '')
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
@@ -310,17 +312,49 @@ export function EventEditor() {
                         </option>
                       ))}
                     </select>
-                    <input
-                      type="text"
-                      placeholder="Value (scene id, text, variable=value...)"
-                      value={action.value}
-                      onChange={(e) => {
-                        const updated = [...form.actions]
-                        updated[idx] = { ...updated[idx], value: e.target.value }
-                        setForm((f) => ({ ...f, actions: updated }))
-                      }}
-                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
-                    />
+                    {action.type === 'play_cinematic' ? (
+                      <select
+                        value={action.value}
+                        onChange={(e) => {
+                          const updated = [...form.actions]
+                          updated[idx] = { ...updated[idx], value: e.target.value }
+                          setForm((f) => ({ ...f, actions: updated }))
+                        }}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">— select cinematic —</option>
+                        {cinematics.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    ) : action.type === 'navigate_scene' ? (
+                      <select
+                        value={action.value}
+                        onChange={(e) => {
+                          const updated = [...form.actions]
+                          updated[idx] = { ...updated[idx], value: e.target.value }
+                          setForm((f) => ({ ...f, actions: updated }))
+                        }}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">— select scene —</option>
+                        {scenes.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder="Value (text, variable=value...)"
+                        value={action.value}
+                        onChange={(e) => {
+                          const updated = [...form.actions]
+                          updated[idx] = { ...updated[idx], value: e.target.value }
+                          setForm((f) => ({ ...f, actions: updated }))
+                        }}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                      />
+                    )}
                   </div>
                   <button
                     onClick={() => handleRemoveAction(idx)}

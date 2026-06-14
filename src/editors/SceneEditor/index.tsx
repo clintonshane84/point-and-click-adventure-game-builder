@@ -1,13 +1,15 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { Stage, Layer, Rect, Image as KonvaImage, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import {
   Plus, Trash2, MousePointer, ChevronDown,
   ImageIcon, X, ZoomIn, ZoomOut,
-  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff,
+  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles, Shrink,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone } from '../../types'
+import { useAiStore } from '../../store/useAiStore'
+import { AiGenerateModal } from '../../components/AiGenerateModal'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -71,10 +73,24 @@ export function SceneEditor() {
     addSceneObject, updateSceneObject, deleteSceneObject,
     updateSceneCharacterPlacement,
     addBlockedZone, deleteBlockedZone,
+    addScaleZone, updateScaleZone, deleteScaleZone,
+    addAsset,
   } = useGameStore()
+  const { settings: aiSettings } = useAiStore()
   const { scenes, activeSceneId, assets, mainCharacter } = project
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? scenes[0]
+
+  // Preloaded sprite sheet images for the canvas preview (covers scene objects and NPC sprites)
+  const [spriteImages, setSpriteImages] = useState<Map<string, HTMLImageElement>>(new Map())
+  useEffect(() => {
+    project.spriteSheets.forEach((sheet) => {
+      if (!sheet.imageUrl || spriteImages.has(sheet.imageUrl)) return
+      const img = new window.Image()
+      img.onload = () => setSpriteImages((prev) => new Map(prev).set(sheet.imageUrl, img))
+      img.src = sheet.imageUrl
+    })
+  }, [project.spriteSheets])
 
   // Selection / tool
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
@@ -99,11 +115,20 @@ export function SceneEditor() {
   const [showBgPicker, setShowBgPicker] = useState(false)
   const bgPickerRef = useRef<HTMLDivElement>(null)
 
+  // AI generate modal
+  const [showAiBgModal, setShowAiBgModal] = useState(false)
+
   // Path editing mode
   const [pathMode, setPathMode] = useState(false)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
   const [drawingZone, setDrawingZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
   const isDrawingRef = useRef(false)
+
+  // Scale zone editing mode
+  const [scaleMode, setScaleMode] = useState(false)
+  const [selectedScaleZoneId, setSelectedScaleZoneId] = useState<string | null>(null)
+  const [drawingScaleZone, setDrawingScaleZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
+  const isDrawingScaleRef = useRef(false)
 
   const selectedObj = activeScene?.objects.find((o) => o.id === selectedObjId) ?? null
   const bgImage = useHtmlImage(activeScene?.backgroundImageUrl)
@@ -131,7 +156,12 @@ export function SceneEditor() {
         setSelectedZoneId(null)
         return
       }
-      if (!pathMode && selectedObjId) {
+      if (scaleMode && selectedScaleZoneId) {
+        deleteScaleZone(activeScene.id, selectedScaleZoneId)
+        setSelectedScaleZoneId(null)
+        return
+      }
+      if (!pathMode && !scaleMode && selectedObjId) {
         deleteSceneObject(activeScene.id, selectedObjId)
         setSelectedObjId(null)
         transformerRef.current?.nodes([])
@@ -139,7 +169,7 @@ export function SceneEditor() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedObjId, selectedZoneId, pathMode, activeScene, deleteSceneObject, deleteBlockedZone])
+  }, [selectedObjId, selectedZoneId, selectedScaleZoneId, pathMode, scaleMode, activeScene, deleteSceneObject, deleteBlockedZone, deleteScaleZone])
 
   // ── Scroll-wheel zoom (Ctrl/Cmd + scroll) ──────────────────────────────────
   useEffect(() => {
@@ -206,8 +236,11 @@ export function SceneEditor() {
   // ── Canvas interactions ────────────────────────────────────────────────────
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (pathMode) {
-      // Click on empty canvas in path mode → deselect zone
       if (e.target === e.target.getStage()) setSelectedZoneId(null)
+      return
+    }
+    if (scaleMode) {
+      if (e.target === e.target.getStage()) setSelectedScaleZoneId(null)
       return
     }
     if (e.target === e.target.getStage()) {
@@ -226,40 +259,67 @@ export function SceneEditor() {
   }, [activeScene, zoom])
 
   const handleStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!pathMode || !activeScene) return
-    // Only start drawing on the stage background, not on existing zones
+    if ((!pathMode && !scaleMode) || !activeScene) return
     if (e.target !== e.target.getStage()) return
     const pos = stageToScene()
     if (!pos) return
-    isDrawingRef.current = true
-    setDrawingZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
-    setSelectedZoneId(null)
-  }, [pathMode, activeScene, stageToScene])
+    if (pathMode) {
+      isDrawingRef.current = true
+      setDrawingZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
+      setSelectedZoneId(null)
+    } else {
+      isDrawingScaleRef.current = true
+      setDrawingScaleZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
+      setSelectedScaleZoneId(null)
+    }
+  }, [pathMode, scaleMode, activeScene, stageToScene])
 
   const handleStageMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!pathMode || !isDrawingRef.current) return
     const pos = stageToScene()
     if (!pos) return
-    setDrawingZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
-  }, [pathMode, stageToScene])
+    if (pathMode && isDrawingRef.current) {
+      setDrawingZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
+    } else if (scaleMode && isDrawingScaleRef.current) {
+      setDrawingScaleZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
+    }
+  }, [pathMode, scaleMode, stageToScene])
 
   const handleStageMouseUp = useCallback(() => {
-    if (!pathMode || !isDrawingRef.current || !drawingZone || !activeScene) return
-    isDrawingRef.current = false
-    const w = Math.abs(drawingZone.w), h = Math.abs(drawingZone.h)
-    if (w > 10 && h > 10) {
-      const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
-      const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
-      const zone: BlockedZone = {
-        id: `zone-${Date.now()}`,
-        label: `Block ${(activeScene.blockedZones?.length ?? 0) + 1}`,
-        x, y, width: w, height: h,
+    if (pathMode && isDrawingRef.current && drawingZone && activeScene) {
+      isDrawingRef.current = false
+      const w = Math.abs(drawingZone.w), h = Math.abs(drawingZone.h)
+      if (w > 10 && h > 10) {
+        const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
+        const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
+        const zone: BlockedZone = {
+          id: `zone-${Date.now()}`,
+          label: `Block ${(activeScene.blockedZones?.length ?? 0) + 1}`,
+          x, y, width: w, height: h,
+        }
+        addBlockedZone(activeScene.id, zone)
+        setSelectedZoneId(zone.id)
       }
-      addBlockedZone(activeScene.id, zone)
-      setSelectedZoneId(zone.id)
+      setDrawingZone(null)
     }
-    setDrawingZone(null)
-  }, [pathMode, drawingZone, activeScene, addBlockedZone])
+    if (scaleMode && isDrawingScaleRef.current && drawingScaleZone && activeScene) {
+      isDrawingScaleRef.current = false
+      const w = Math.abs(drawingScaleZone.w), h = Math.abs(drawingScaleZone.h)
+      if (w > 10 && h > 10) {
+        const x = drawingScaleZone.w < 0 ? drawingScaleZone.startX + drawingScaleZone.w : drawingScaleZone.startX
+        const y = drawingScaleZone.h < 0 ? drawingScaleZone.startY + drawingScaleZone.h : drawingScaleZone.startY
+        const zone: ScaleZone = {
+          id: `szn-${Date.now()}`,
+          label: `Scale ${(activeScene.scaleZones?.length ?? 0) + 1}`,
+          x, y, width: w, height: h,
+          scale: 0.5,
+          speedMultiplier: 0.5,
+        }
+        addScaleZone(activeScene.id, zone)
+        setSelectedScaleZoneId(zone.id)
+      }
+      setDrawingScaleZone(null)
+    }
+  }, [pathMode, scaleMode, drawingZone, drawingScaleZone, activeScene, addBlockedZone, addScaleZone])
 
   const handleObjectClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>, objId: string) => {
@@ -307,6 +367,23 @@ export function SceneEditor() {
   function handleClearBgImage() {
     if (!activeScene) return
     useGameStore.getState().updateScene(activeScene.id, { backgroundImageUrl: undefined })
+  }
+
+  function handleAiBgGenerated(dataUrl: string, prompt: string) {
+    const name = `AI: ${prompt.slice(0, 40).trim()}`
+    const asset: Asset = {
+      id: `asset-${Date.now()}`,
+      name,
+      type: 'image',
+      url: dataUrl,
+      size: Math.round(dataUrl.length * 0.75),
+      createdAt: new Date().toISOString(),
+    }
+    addAsset(asset)
+    if (activeScene) {
+      useGameStore.getState().updateScene(activeScene.id, { backgroundImageUrl: dataUrl })
+    }
+    setShowAiBgModal(false)
   }
 
   // ── Delete selected object (toolbar) ──────────────────────────────────────
@@ -496,16 +573,36 @@ export function SceneEditor() {
 
           {/* Path mode toggle */}
           <button
-            onClick={() => { setPathMode((v) => !v); setSelectedObjId(null); setSelectedZoneId(null); setDrawingZone(null) }}
+            onClick={() => {
+              const next = !pathMode
+              setPathMode(next)
+              if (next) setScaleMode(false)
+              setSelectedObjId(null); setSelectedZoneId(null); setSelectedScaleZoneId(null); setDrawingZone(null); setDrawingScaleZone(null)
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              pathMode
-                ? 'bg-red-700 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              pathMode ? 'bg-red-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
             }`}
             title="Toggle path/blocking editor"
           >
             <ShieldOff size={14} />
             {pathMode ? 'Pathing (ON)' : 'Pathing'}
+          </button>
+
+          {/* Scale zone mode toggle */}
+          <button
+            onClick={() => {
+              const next = !scaleMode
+              setScaleMode(next)
+              if (next) setPathMode(false)
+              setSelectedObjId(null); setSelectedZoneId(null); setSelectedScaleZoneId(null); setDrawingZone(null); setDrawingScaleZone(null)
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+              scaleMode ? 'bg-teal-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+            title="Toggle scale/perspective zones editor"
+          >
+            <Shrink size={14} />
+            {scaleMode ? 'Scale Zones (ON)' : 'Scale Zones'}
           </button>
 
           {pathMode && selectedZoneId && (
@@ -517,9 +614,24 @@ export function SceneEditor() {
             </button>
           )}
 
+          {scaleMode && selectedScaleZoneId && (
+            <button
+              onClick={() => { if (activeScene) deleteScaleZone(activeScene.id, selectedScaleZoneId); setSelectedScaleZoneId(null) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-teal-700 hover:bg-teal-600 text-white"
+            >
+              <Trash2 size={14} /> Delete Scale Zone
+            </button>
+          )}
+
           {pathMode && (
             <span className="text-xs text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-700/30">
               Click &amp; drag to draw blocked zones · Click zone to select · Del to remove
+            </span>
+          )}
+
+          {scaleMode && (
+            <span className="text-xs text-teal-400 bg-teal-900/20 px-2 py-1 rounded border border-teal-700/30">
+              Click &amp; drag to draw scale zones · Click zone to set shrink &amp; speed · Del to remove
             </span>
           )}
 
@@ -561,8 +673,9 @@ export function SceneEditor() {
 
           <span className="text-xs text-gray-600 pl-2 border-l border-gray-700">
             {activeScene?.name} — {activeScene?.width}×{activeScene?.height}
-            {!pathMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
+            {!pathMode && !scaleMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
             {pathMode && <span className="ml-2 text-red-400">{activeScene?.blockedZones?.length ?? 0} blocked zone{(activeScene?.blockedZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
+            {scaleMode && <span className="ml-2 text-teal-400">{activeScene?.scaleZones?.length ?? 0} scale zone{(activeScene?.scaleZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
           </span>
         </div>
 
@@ -607,68 +720,126 @@ export function SceneEditor() {
                     />
                   )}
 
-                  {/* Objects sorted by z-index */}
-                  {[...activeScene.objects]
-                    .sort((a, b) => a.zIndex - b.zIndex)
-                    .map((obj) => {
+                  {/* Objects + character, depth-sorted by z-index.
+                      Character depth = bottom of character (feet Y).
+                      Objects with zIndex > charDepth render in front of the character. */}
+                  {(() => {
+                    const cp = activeScene.characterPlacement
+                    const charDepth = cp?.visible
+                      ? cp.y + mainCharacter.height
+                      : null
+
+                    const sorted = [...activeScene.objects].sort((a, b) => a.zIndex - b.zIndex)
+
+                    function renderSceneObj(obj: typeof sorted[0]) {
                       if (!obj.visible) return null
                       const cfg = TYPE_CONFIG[obj.type]
                       const isSelected = obj.id === selectedObjId
-                      return (
-                        <Rect
-                          key={obj.id}
-                          x={obj.x} y={obj.y}
-                          width={obj.width} height={obj.height}
-                          opacity={obj.opacity}
-                          fill={isSelected ? 'rgba(99,102,241,0.35)' : cfg.fill}
-                          stroke={isSelected ? '#818cf8' : cfg.stroke}
-                          strokeWidth={obj.type === 'hotspot' ? 1.5 : 2}
-                          dash={isSelected ? undefined : cfg.dash}
-                          draggable
-                          onClick={(e) => handleObjectClick(e, obj.id)}
-                          onDragEnd={(e) => handleDragEnd(e, obj.id)}
-                          onTransformEnd={(e) => handleTransformEnd(e, obj.id)}
-                        />
-                      )
-                    })}
 
-                  {/* Object name labels (hidden for hotspots to keep them invisible) */}
-                  {activeScene.objects
-                    .filter((o) => o.visible && o.type !== 'hotspot')
-                    .map((obj) => (
-                      <Text
-                        key={`lbl-${obj.id}`}
-                        x={obj.x + 4} y={obj.y + 4}
-                        text={obj.name}
-                        fontSize={12}
-                        fill="#e2e8f0"
-                        listening={false}
-                      />
-                    ))}
+                      // Resolve NPC sprite if this is a character object with an npcId
+                      let sheet = obj.spriteSheetId
+                        ? project.spriteSheets.find((s) => s.id === obj.spriteSheetId) ?? null
+                        : null
+                      let fi = obj.frameIndex ?? 0
 
-                  {/* Hotspot labels (shown only when selected so they're discoverable) */}
-                  {activeScene.objects
-                    .filter((o) => o.type === 'hotspot' && o.id === selectedObjId)
-                    .map((obj) => (
-                      <Text
-                        key={`lbl-hs-${obj.id}`}
-                        x={obj.x + 4} y={obj.y + 4}
-                        text={`⬚ ${obj.name}`}
-                        fontSize={11}
-                        fill="#818cf8"
-                        listening={false}
-                      />
-                    ))}
+                      if (!sheet && obj.type === 'character' && obj.npcId) {
+                        const npc = (project.npcs ?? []).find((n: NpcCharacter) => n.id === obj.npcId)
+                        if (npc) {
+                          const facingAnim = npc.animations[npc.defaultFacing]
+                          if (facingAnim?.spriteSheetId) {
+                            sheet = project.spriteSheets.find((s) => s.id === facingAnim.spriteSheetId) ?? null
+                            if (sheet && facingAnim.animationId) {
+                              const animDef = sheet.animations.find((a) => a.id === facingAnim.animationId)
+                              fi = animDef?.startFrame ?? 0
+                            }
+                          }
+                        }
+                      }
 
-                  {/* Character start position marker */}
-                  {activeScene.characterPlacement?.visible && (() => {
-                    const cp = activeScene.characterPlacement!
-                    const cw = mainCharacter.width
-                    const ch = mainCharacter.height
-                    return (
-                      <>
-                        {charSpriteImage && charSheet ? (
+                      const sheetImg = sheet ? spriteImages.get(sheet.imageUrl) ?? null : null
+                      const col = fi % (sheet?.cols ?? 1)
+                      const row = Math.floor(fi / (sheet?.cols ?? 1))
+
+                      const handlers = {
+                        draggable: true,
+                        onClick: (e: Konva.KonvaEventObject<MouseEvent>) => handleObjectClick(e, obj.id),
+                        onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => handleDragEnd(e, obj.id),
+                        onTransformEnd: (e: Konva.KonvaEventObject<Event>) => handleTransformEnd(e, obj.id),
+                      }
+
+                      return [
+                        sheetImg && sheet ? (
                           <KonvaImage
+                            key={obj.id}
+                            image={sheetImg}
+                            crop={{
+                              x: col * sheet.frameWidth,
+                              y: row * sheet.frameHeight,
+                              width: sheet.frameWidth,
+                              height: sheet.frameHeight,
+                            }}
+                            x={obj.x} y={obj.y}
+                            width={obj.width} height={obj.height}
+                            opacity={obj.opacity}
+                            {...handlers}
+                          />
+                        ) : (
+                          <Rect
+                            key={obj.id}
+                            x={obj.x} y={obj.y}
+                            width={obj.width} height={obj.height}
+                            opacity={obj.opacity}
+                            fill={isSelected ? 'rgba(99,102,241,0.35)' : cfg.fill}
+                            stroke={isSelected ? '#818cf8' : cfg.stroke}
+                            strokeWidth={obj.type === 'hotspot' ? 1.5 : 2}
+                            dash={isSelected ? undefined : cfg.dash}
+                            {...handlers}
+                          />
+                        ),
+                        // Selection overlay for image objects (Transformer already shows handles)
+                        isSelected && sheetImg && (
+                          <Rect
+                            key={`sel-${obj.id}`}
+                            x={obj.x} y={obj.y}
+                            width={obj.width} height={obj.height}
+                            fill="rgba(99,102,241,0.20)"
+                            stroke="#818cf8"
+                            strokeWidth={2}
+                            listening={false}
+                          />
+                        ),
+                        // Label: only show for non-hotspot placeholder objects (no image assigned)
+                        !sheetImg && obj.type !== 'hotspot' && (
+                          <Text
+                            key={`lbl-${obj.id}`}
+                            x={obj.x + 4} y={obj.y + 4}
+                            text={obj.name}
+                            fontSize={12}
+                            fill="#e2e8f0"
+                            listening={false}
+                          />
+                        ),
+                        obj.type === 'hotspot' && obj.id === selectedObjId && (
+                          <Text
+                            key={`lbl-hs-${obj.id}`}
+                            x={obj.x + 4} y={obj.y + 4}
+                            text={`⬚ ${obj.name}`}
+                            fontSize={11}
+                            fill="#818cf8"
+                            listening={false}
+                          />
+                        ),
+                      ]
+                    }
+
+                    function renderCharacter() {
+                      if (!cp?.visible) return null
+                      const cw = mainCharacter.width
+                      const ch = mainCharacter.height
+                      return [
+                        charSpriteImage && charSheet ? (
+                          <KonvaImage
+                            key="char-sprite"
                             image={charSpriteImage}
                             crop={{
                               x: charFrameCol * charSheet.frameWidth,
@@ -682,6 +853,7 @@ export function SceneEditor() {
                           />
                         ) : (
                           <Rect
+                            key="char-rect"
                             x={cp.x} y={cp.y}
                             width={cw} height={ch}
                             fill="rgba(99,102,241,0.18)"
@@ -690,16 +862,29 @@ export function SceneEditor() {
                             dash={[5, 3]}
                             listening={false}
                           />
-                        )}
+                        ),
                         <Text
+                          key="char-lbl"
                           x={cp.x} y={cp.y - 16}
                           text={`${FACING_ARROWS[cp.facing]} ${mainCharacter.name}`}
                           fontSize={11}
                           fill="#a5b4fc"
                           listening={false}
-                        />
-                      </>
-                    )
+                        />,
+                      ]
+                    }
+
+                    const elements: React.ReactNode[] = []
+                    let charDrawn = false
+                    for (const obj of sorted) {
+                      if (!charDrawn && charDepth !== null && obj.zIndex > charDepth) {
+                        elements.push(...(renderCharacter() ?? []))
+                        charDrawn = true
+                      }
+                      elements.push(...(renderSceneObj(obj) ?? []))
+                    }
+                    if (!charDrawn) elements.push(...(renderCharacter() ?? []))
+                    return elements
                   })()}
 
                   {/* Blocked zones */}
@@ -732,7 +917,7 @@ export function SceneEditor() {
                     />
                   ))}
 
-                  {/* Drawing preview */}
+                  {/* Drawing preview — blocked zone */}
                   {pathMode && drawingZone && (() => {
                     const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
                     const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
@@ -742,6 +927,53 @@ export function SceneEditor() {
                         width={Math.abs(drawingZone.w)} height={Math.abs(drawingZone.h)}
                         fill="rgba(239,68,68,0.25)"
                         stroke="#ef4444"
+                        strokeWidth={2}
+                        dash={[5, 3]}
+                        listening={false}
+                      />
+                    )
+                  })()}
+
+                  {/* Scale zones */}
+                  {(activeScene.scaleZones ?? []).map((zone) => {
+                    const isSel = zone.id === selectedScaleZoneId
+                    return (
+                      <Rect
+                        key={zone.id}
+                        x={zone.x} y={zone.y}
+                        width={zone.width} height={zone.height}
+                        fill={isSel ? 'rgba(20,184,166,0.30)' : 'rgba(20,184,166,0.12)'}
+                        stroke={isSel ? '#14b8a6' : '#5eead4'}
+                        strokeWidth={isSel ? 2.5 : 1.5}
+                        dash={isSel ? undefined : [6, 3]}
+                        listening={scaleMode}
+                        onClick={scaleMode ? (e) => { e.cancelBubble = true; setSelectedScaleZoneId(zone.id) } : undefined}
+                      />
+                    )
+                  })}
+
+                  {/* Scale zone labels — shown when scale mode is on */}
+                  {scaleMode && (activeScene.scaleZones ?? []).map((zone) => (
+                    <Text
+                      key={`lbl-sz-${zone.id}`}
+                      x={zone.x + 4} y={zone.y + 4}
+                      text={`${zone.label} ×${zone.scale} spd×${zone.speedMultiplier}`}
+                      fontSize={10}
+                      fill="#5eead4"
+                      listening={false}
+                    />
+                  ))}
+
+                  {/* Drawing preview — scale zone */}
+                  {scaleMode && drawingScaleZone && (() => {
+                    const x = drawingScaleZone.w < 0 ? drawingScaleZone.startX + drawingScaleZone.w : drawingScaleZone.startX
+                    const y = drawingScaleZone.h < 0 ? drawingScaleZone.startY + drawingScaleZone.h : drawingScaleZone.startY
+                    return (
+                      <Rect
+                        x={x} y={y}
+                        width={Math.abs(drawingScaleZone.w)} height={Math.abs(drawingScaleZone.h)}
+                        fill="rgba(20,184,166,0.20)"
+                        stroke="#14b8a6"
                         strokeWidth={2}
                         dash={[5, 3]}
                         listening={false}
@@ -766,9 +998,79 @@ export function SceneEditor() {
       <div className="w-56 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-gray-700">
           <span className="text-gray-300 text-sm font-semibold">
-            {pathMode ? 'Blocked Zone' : 'Properties'}
+            {pathMode ? 'Blocked Zone' : scaleMode ? 'Scale Zone' : 'Properties'}
           </span>
         </div>
+
+        {/* Scale zone mode: show selected scale zone properties */}
+        {scaleMode && (() => {
+          const zone = (activeScene?.scaleZones ?? []).find((z) => z.id === selectedScaleZoneId)
+          if (!zone || !activeScene) return (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <p className="text-gray-500 text-xs text-center leading-relaxed">
+                Click &amp; drag on the canvas to create a scale zone.<br />
+                <span className="text-gray-600">Click an existing zone to edit it.</span>
+              </p>
+            </div>
+          )
+          return (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Label</label>
+                <input
+                  type="text"
+                  value={zone.label}
+                  onChange={(e) => updateScaleZone(activeScene.id, zone.id, { label: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Scale — {(zone.scale * 100).toFixed(0)}%
+                </label>
+                <input
+                  type="range" min={0.1} max={1} step={0.05}
+                  value={zone.scale}
+                  onChange={(e) => updateScaleZone(activeScene.id, zone.id, { scale: parseFloat(e.target.value) })}
+                  className="w-full accent-teal-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Speed — {(zone.speedMultiplier * 100).toFixed(0)}%
+                </label>
+                <input
+                  type="range" min={0.1} max={1} step={0.05}
+                  value={zone.speedMultiplier}
+                  onChange={(e) => updateScaleZone(activeScene.id, zone.id, { speedMultiplier: parseFloat(e.target.value) })}
+                  className="w-full accent-teal-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(['x', 'y', 'width', 'height'] as const).map((prop) => (
+                  <div key={prop}>
+                    <label className="text-xs text-gray-400 block mb-1 uppercase">{prop === 'width' ? 'W' : prop === 'height' ? 'H' : prop.toUpperCase()}</label>
+                    <input
+                      type="number"
+                      value={Math.round(zone[prop])}
+                      onChange={(e) => updateScaleZone(activeScene.id, zone.id, { [prop]: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => { deleteScaleZone(activeScene.id, zone.id); setSelectedScaleZoneId(null) }}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm bg-teal-800 hover:bg-teal-700 text-white mt-2"
+              >
+                <Trash2 size={13} /> Delete Zone
+              </button>
+              <p className="text-xs text-teal-400/70 bg-teal-900/10 rounded p-2">
+                Character shrinks and slows inside this zone to simulate perspective depth.
+              </p>
+            </div>
+          )
+        })()}
 
         {/* Path mode: show selected zone properties */}
         {pathMode && (() => {
@@ -822,7 +1124,7 @@ export function SceneEditor() {
           )
         })()}
 
-        {selectedObj && activeScene && !pathMode ? (
+        {selectedObj && activeScene && !pathMode && !scaleMode ? (
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
 
             {/* Name */}
@@ -914,13 +1216,110 @@ export function SceneEditor() {
               />
             </div>
 
+            {/* Sprite picker — available for sprite and item types */}
+            {(selectedObj.type === 'sprite' || selectedObj.type === 'item') && (
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Sprite</label>
+                <select
+                  value={selectedObj.spriteSheetId ?? ''}
+                  onChange={(e) => {
+                    updateSceneObject(activeScene.id, selectedObj.id, {
+                      spriteSheetId: e.target.value || undefined,
+                      frameIndex: 0,
+                    })
+                  }}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">— none —</option>
+                  {project.spriteSheets.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+
+                {selectedObj.spriteSheetId && (() => {
+                  const sheet = project.spriteSheets.find((s) => s.id === selectedObj.spriteSheetId)
+                  if (!sheet) return null
+                  const totalFrames = sheet.rows * sheet.cols
+                  const currentFrame = selectedObj.frameIndex ?? 0
+                  const scale = 36 / Math.max(sheet.frameWidth, sheet.frameHeight)
+                  return (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-500">Frame {currentFrame} of {totalFrames - 1}</span>
+                        <button
+                          onClick={() => updateSceneObject(activeScene.id, selectedObj.id, { spriteSheetId: undefined, frameIndex: undefined })}
+                          className="text-xs text-gray-600 hover:text-red-400"
+                          title="Remove sprite"
+                        >
+                          ✕ remove
+                        </button>
+                      </div>
+                      <div
+                        className="grid gap-0.5 max-h-36 overflow-y-auto"
+                        style={{ gridTemplateColumns: `repeat(${Math.min(sheet.cols, 4)}, 1fr)` }}
+                      >
+                        {Array.from({ length: totalFrames }, (_, fi) => {
+                          const fc = fi % sheet.cols
+                          const fr = Math.floor(fi / sheet.cols)
+                          const isCurrent = fi === currentFrame
+                          return (
+                            <button
+                              key={fi}
+                              title={`Frame ${fi}`}
+                              onClick={() => updateSceneObject(activeScene.id, selectedObj.id, { frameIndex: fi })}
+                              className={`relative overflow-hidden rounded border ${
+                                isCurrent ? 'border-indigo-400' : 'border-gray-700 hover:border-gray-500'
+                              }`}
+                              style={{ width: 38, height: 38 }}
+                            >
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  backgroundImage: `url(${sheet.imageUrl})`,
+                                  backgroundPosition: `-${fc * sheet.frameWidth * scale}px -${fr * sheet.frameHeight * scale}px`,
+                                  backgroundSize: `${sheet.imageWidth * scale}px ${sheet.imageHeight * scale}px`,
+                                  backgroundRepeat: 'no-repeat',
+                                  imageRendering: 'pixelated',
+                                }}
+                              />
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
+            {/* NPC picker — available for character type objects */}
+            {selectedObj.type === 'character' && (
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">NPC Character</label>
+                <select
+                  value={selectedObj.npcId ?? ''}
+                  onChange={(e) => updateSceneObject(activeScene.id, selectedObj.id, { npcId: e.target.value || undefined })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">— none —</option>
+                  {(project.npcs ?? []).map((npc: NpcCharacter) => (
+                    <option key={npc.id} value={npc.id}>{npc.name}</option>
+                  ))}
+                </select>
+                {(project.npcs ?? []).length === 0 && (
+                  <p className="text-xs text-gray-600 mt-1 italic">Add NPCs in the Characters editor first.</p>
+                )}
+              </div>
+            )}
+
             {selectedObj.type === 'hotspot' && (
               <p className="text-xs text-indigo-400 bg-indigo-900/20 rounded p-2">
                 Hotspots are invisible in-game — they act as click/hover trigger zones.
               </p>
             )}
           </div>
-        ) : !pathMode ? (
+        ) : !pathMode && !scaleMode ? (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-gray-500 text-xs text-center px-4 leading-relaxed">
               Select an object to edit its properties.<br />
@@ -972,6 +1371,15 @@ export function SceneEditor() {
                 </div>
               )}
 
+              <div className="space-y-1.5">
+              {aiSettings.enabled && (
+                <button
+                  onClick={() => setShowAiBgModal(true)}
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs bg-violet-700 hover:bg-violet-600 text-white border border-violet-600"
+                >
+                  <Sparkles size={11} /> AI Generate Background
+                </button>
+              )}
               <div className="relative" ref={bgPickerRef}>
                 <button
                   onClick={() => setShowBgPicker((v) => !v)}
@@ -1002,6 +1410,7 @@ export function SceneEditor() {
                     )}
                   </div>
                 )}
+              </div>
               </div>
             </div>
 
@@ -1069,6 +1478,15 @@ export function SceneEditor() {
           </div>
         )}
       </div>
+
+      {/* AI Generate Background Modal */}
+      {showAiBgModal && (
+        <AiGenerateModal
+          title="AI Generate Scene Background"
+          onGenerated={handleAiBgGenerated}
+          onClose={() => setShowAiBgModal(false)}
+        />
+      )}
     </div>
   )
 }

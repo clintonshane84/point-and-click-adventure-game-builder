@@ -113,6 +113,8 @@ export class GameEngine {
       dialogText: null,
       dialogCallback: null,
       character: null,
+      activeHotspots: new Set(),
+      cinematic: null,
     };
   }
 
@@ -143,15 +145,26 @@ export class GameEngine {
 
   _loadScene(sceneId) {
     this.state.currentSceneId = sceneId;
+    this.state.activeHotspots = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
       if (scene.backgroundImageUrl) this._loadImage(scene.backgroundImageUrl);
-      scene.objects.forEach(o => { if (o.imageUrl) this._loadImage(o.imageUrl); });
+      scene.objects.forEach(o => {
+        if (o.imageUrl) this._loadImage(o.imageUrl);
+        if (o.spriteSheetId) { const sh=this.project.spriteSheets?.find(s=>s.id===o.spriteSheetId); if(sh?.imageUrl) this._loadImage(sh.imageUrl); }
+      });
       const mc = this.project.mainCharacter;
       if (mc) {
         ['up','down','left','right'].forEach(dir => {
           const sh = this._getCharSheet(dir); if (sh?.imageUrl) this._loadImage(sh.imageUrl);
+        });
+      }
+      for(const npc of (this.project.npcs||[])){
+        ['up','down','left','right'].forEach(dir=>{
+          const a=npc.animations[dir]; if(a?.spriteSheetId){
+            const sh=this.project.spriteSheets?.find(s=>s.id===a.spriteSheetId); if(sh?.imageUrl) this._loadImage(sh.imageUrl);
+          }
         });
       }
       const cp = scene.characterPlacement;
@@ -162,12 +175,14 @@ export class GameEngine {
           waypoints: [], waypointIndex: 0,
           facing, moving: false,
           animFrame: this._getAnimStartFrame(facing), animTimer: 0,
+          scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
         };
       } else { this.state.character = null; }
     }
+    const hotspotIds=new Set(scene?.objects.filter(o=>o.type==='hotspot').map(o=>o.id)??[]);
     this.project.events
-      .filter(e => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled)
-      .forEach(ev => this._execEvent(ev));
+      .filter(e=>e.sceneId===sceneId&&e.trigger==='enter'&&e.enabled&&!hotspotIds.has(e.objectId))
+      .forEach(ev=>this._execEvent(ev));
   }
 
   _loop() {
@@ -176,13 +191,53 @@ export class GameEngine {
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16;
     this.lastFrameTime = now;
     this._updateCharacter(dt);
+    const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+    if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);}
+    if(this.state.cinematic) this._updateCinematic(dt);
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
   }
 
+  _checkHotspots(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    for(const obj of scene.objects){
+      if(obj.type!=='hotspot') continue;
+      const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
+      if(!vis) continue;
+      const inside=fx>=obj.x&&fx<=obj.x+obj.width&&fy>=obj.y&&fy<=obj.y+obj.height;
+      const wasInside=this.state.activeHotspots.has(obj.id);
+      if(inside&&!wasInside){
+        this.state.activeHotspots.add(obj.id);
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&e.trigger==='enter'&&e.enabled)
+          .forEach(ev=>this._execEvent(ev));
+      } else if(!inside&&wasInside){
+        this.state.activeHotspots.delete(obj.id);
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&e.trigger==='exit'&&e.enabled)
+          .forEach(ev=>this._execEvent(ev));
+      }
+    }
+  }
+
+  _checkScaleZones(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    let ts=1,tm=1;
+    for(const z of (scene.scaleZones||[])){
+      if(fx>=z.x&&fx<=z.x+z.width&&fy>=z.y&&fy<=z.y+z.height){ts=z.scale;tm=z.speedMultiplier;break;}
+    }
+    char.targetScale=ts; char.targetSpeedMult=tm;
+  }
+
   _updateCharacter(dt) {
     const char = this.state.character, mc = this.project.mainCharacter;
-    if (!char || !char.moving || !mc) return;
+    if (!char || !mc) return;
+    const lf=Math.min(1,dt*3/1000);
+    char.scale+=(char.targetScale-char.scale)*lf;
+    char.speedMult+=(char.targetSpeedMult-char.speedMult)*lf;
+    if (!char.moving) return;
     const target = char.waypoints[char.waypointIndex];
     if (!target) { char.moving = false; return; }
     const tx = target.x - mc.width/2, ty = target.y - mc.height/2;
@@ -197,7 +252,7 @@ export class GameEngine {
     }
     if (Math.abs(dx) >= Math.abs(dy)) { char.facing = dx>0?'right':'left'; }
     else { char.facing = dy>0?'down':'up'; }
-    const step = CHAR_SPEED*(dt/1000), ratio = Math.min(step/dist,1);
+    const step = CHAR_SPEED*char.speedMult*(dt/1000), ratio = Math.min(step/dist,1);
     char.x += dx*ratio; char.y += dy*ratio;
     const anim = this._getCharAnim(char.facing);
     if (anim && anim.fps > 0) {
@@ -228,47 +283,83 @@ export class GameEngine {
       const img = this.imageCache.get(scene.backgroundImageUrl);
       if (img) ctx.drawImage(img, 0, 0, scene.width, scene.height);
     }
-    [...scene.objects].sort((a,b) => a.zIndex-b.zIndex).forEach(obj => {
-      const vis = this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
-      if (!vis) return;
-      ctx.save(); ctx.globalAlpha = obj.opacity;
-      const img = obj.imageUrl ? this.imageCache.get(obj.imageUrl) : null;
-      if (img) {
-        ctx.drawImage(img, obj.x, obj.y, obj.width, obj.height);
+    const sortedObjs=[...scene.objects].sort((a,b)=>a.zIndex-b.zIndex);
+    const char=this.state.character,mc=this.project.mainCharacter;
+    const charDepth=(char&&mc)?char.y+mc.height:null;
+    let charDrawn=false;
+    for(const obj of sortedObjs){
+      const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
+      if(!vis) continue;
+      if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
+      let ro=obj;
+      const _ov=obj.type==='character'&&obj.npcId&&this.state.cinematic?this.state.cinematic.npcOverrides.get(obj.npcId):null;
+      if(_ov) ro=Object.assign({},obj,{x:_ov.x,y:_ov.y});
+      ctx.save(); ctx.globalAlpha=ro.opacity;
+      const ssSheet=ro.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===ro.spriteSheetId):null;
+      const ssImg=ssSheet?this.imageCache.get(ssSheet.imageUrl):null;
+      if(ssImg&&ssSheet){
+        const fi=ro.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
+        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,ro.x,ro.y,ro.width,ro.height);
+        ctx.restore(); continue;
+      }
+      if(ro.type==='character'&&ro.npcId){
+        const npc=(this.project.npcs||[]).find(n=>n.id===ro.npcId);
+        if(npc){
+          const fa=npc.animations[npc.defaultFacing];
+          if(fa?.spriteSheetId){
+            const nsh=this.project.spriteSheets?.find(s=>s.id===fa.spriteSheetId);
+            if(nsh){
+              const nim=this.imageCache.get(nsh.imageUrl);
+              if(nim){
+                const adef=nsh.animations.find(a=>a.id===fa.animationId);
+                const fi=adef?.startFrame??0,col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
+                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,ro.x,ro.y,ro.width,ro.height);
+                ctx.restore(); continue;
+              }
+            }
+          }
+        }
+      }
+      const img=ro.imageUrl?this.imageCache.get(ro.imageUrl):null;
+      if(img){
+        ctx.drawImage(img,ro.x,ro.y,ro.width,ro.height);
       } else {
         const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b'};
-        ctx.fillStyle=colors[obj.type]||'#4f46e5';
-        ctx.fillRect(obj.x,obj.y,obj.width,obj.height);
-        if(obj.type!=='hotspot'){
+        ctx.fillStyle=colors[ro.type]||'#4f46e5';
+        ctx.fillRect(ro.x,ro.y,ro.width,ro.height);
+        if(ro.type!=='hotspot'){
           ctx.fillStyle='#fff'; ctx.font='14px sans-serif';
           ctx.textAlign='center'; ctx.textBaseline='middle';
-          ctx.fillText(obj.name,obj.x+obj.width/2,obj.y+obj.height/2);
+          ctx.fillText(ro.name,ro.x+ro.width/2,ro.y+ro.height/2);
         }
       }
       ctx.restore();
-    });
-    this._renderCharacter();
+    }
+    if(!charDrawn) this._renderCharacter();
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
+    if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
   }
 
   _renderCharacter() {
     const char=this.state.character, mc=this.project.mainCharacter;
     if (!char||!mc) return;
     const {ctx}=this, cw=mc.width, ch=mc.height;
+    const scale=char.scale??1;
+    const sw=cw*scale, sh=ch*scale;
+    const rx=Math.round(char.x+(cw-sw)/2), ry=Math.round(char.y+ch-sh);
     const sheet=this._getCharSheet(char.facing);
     const img=sheet?this.imageCache.get(sheet.imageUrl):null;
     if (img&&sheet) {
       const col=char.animFrame%sheet.cols, row=Math.floor(char.animFrame/sheet.cols);
-      ctx.drawImage(img,col*sheet.frameWidth,row*sheet.frameHeight,sheet.frameWidth,sheet.frameHeight,
-        Math.round(char.x),Math.round(char.y),cw,ch);
+      ctx.drawImage(img,col*sheet.frameWidth,row*sheet.frameHeight,sheet.frameWidth,sheet.frameHeight,rx,ry,sw,sh);
     } else {
       ctx.save();
       ctx.fillStyle='rgba(99,102,241,0.7)';
-      ctx.fillRect(char.x,char.y,cw,ch);
-      ctx.fillStyle='#fff'; ctx.font=Math.min(12,ch*0.18)+'px sans-serif';
+      ctx.fillRect(rx,ry,sw,sh);
+      ctx.fillStyle='#fff'; ctx.font=Math.min(12,sh*0.18)+'px sans-serif';
       ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(mc.name||'Player',char.x+cw/2,char.y+ch/2);
+      ctx.fillText(mc.name||'Player',rx+sw/2,ry+sh/2);
       ctx.restore();
     }
   }
@@ -336,7 +427,7 @@ export class GameEngine {
 
   _objAt(scene,x,y) {
     return [...scene.objects]
-      .filter(o=>(this.objectVisibility.has(o.id)?this.objectVisibility.get(o.id):o.visible))
+      .filter(o=>o.type!=='hotspot'&&(this.objectVisibility.has(o.id)?this.objectVisibility.get(o.id):o.visible))
       .sort((a,b)=>b.zIndex-a.zIndex)
       .find(o=>x>=o.x&&x<=o.x+o.width&&y>=o.y&&y<=o.y+o.height)||null;
   }
@@ -362,7 +453,181 @@ export class GameEngine {
         if(a?.url) new Audio(a.url).play().catch(()=>{});
         break;
       }
+      case 'play_cinematic': this._playCinematic(action.value); break;
     }
+  }
+
+  _playCinematic(cinematicId){
+    const cine=(this.project.cinematics||[]).find(c=>c.id===cinematicId);
+    if(!cine||cine.steps.length===0) return;
+    if(cine.sceneId&&cine.sceneId!==this.state.currentSceneId) this._loadScene(cine.sceneId);
+    this.state.cinematic={
+      steps:cine.steps,
+      stepIndex:0,
+      mode:null,
+      waitMs:0,
+      npcOverrides:new Map(),
+      npcTargets:new Map(),
+      activeNpcId:null,
+      actionText:null,
+      actionTimer:0,
+      completionAction:cine.completionAction,
+      completionValue:cine.completionValue,
+    };
+    this._executeCinematicStep(cine.steps[0]);
+  }
+
+  _executeCinematicStep(step){
+    const cine=this.state.cinematic;
+    if(!cine) return;
+    cine.actionText=null;
+    cine.activeNpcId=null;
+    switch(step.type){
+      case 'walk_to':{
+        if(!step.characterId||step.characterId==='main-character'){
+          const char=this.state.character,mc=this.project.mainCharacter;
+          const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+          if(char&&mc&&scene){
+            const path=findPath(scene.blockedZones||[],scene.width,scene.height,
+              char.x+mc.width/2,char.y+mc.height/2,step.targetX??0,step.targetY??0,mc.width,mc.height);
+            if(path.length>0){char.waypoints=path;char.waypointIndex=0;char.moving=true;}
+          }
+          cine.mode='walking_main';
+        } else {
+          const npcId=step.characterId;
+          const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+          const npcObj=scene?.objects.find(o=>o.type==='character'&&o.npcId===npcId);
+          const start=cine.npcOverrides.get(npcId)??{x:npcObj?.x??0,y:npcObj?.y??0};
+          cine.npcOverrides.set(npcId,{...start});
+          cine.npcTargets.set(npcId,{x:step.targetX??0,y:step.targetY??0});
+          cine.activeNpcId=npcId;
+          cine.mode='walking_npc';
+        }
+        break;
+      }
+      case 'talk':{
+        const npc=step.characterId&&step.characterId!=='main-character'?(this.project.npcs||[]).find(n=>n.id===step.characterId):null;
+        const speaker=npc?.name??(this.project.mainCharacter?.name??'Player');
+        this.state.dialogText='['+speaker+']: '+(step.text??'');
+        this.state.dialogCallback=()=>this._advanceCinematicStep();
+        cine.mode='waiting_dialog';
+        break;
+      }
+      case 'show_dialog':{
+        this.state.dialogText=step.text??'';
+        this.state.dialogCallback=()=>this._advanceCinematicStep();
+        cine.mode='waiting_dialog';
+        break;
+      }
+      case 'action':{
+        const npc=step.characterId&&step.characterId!=='main-character'?(this.project.npcs||[]).find(n=>n.id===step.characterId):null;
+        const actor=npc?.name??(this.project.mainCharacter?.name??'Player');
+        cine.actionText=actor+' '+(step.actionLabel??'performs action');
+        cine.actionTimer=2000;
+        cine.mode='action';
+        break;
+      }
+      case 'wait':{
+        cine.waitMs=(step.duration??1)*1000;
+        cine.mode='waiting';
+        break;
+      }
+      case 'set_variable':{
+        if(step.variable){
+          const i=step.variable.indexOf('=');
+          if(i!==-1) this.state.variables[step.variable.slice(0,i).trim()]=step.variable.slice(i+1).trim();
+        }
+        this._advanceCinematicStep();
+        break;
+      }
+      case 'play_sound': this._advanceCinematicStep(); break;
+    }
+  }
+
+  _advanceCinematicStep(){
+    const cine=this.state.cinematic;
+    if(!cine) return;
+    cine.stepIndex++;
+    if(cine.stepIndex>=cine.steps.length){this._completeCinematic();return;}
+    this._executeCinematicStep(cine.steps[cine.stepIndex]);
+  }
+
+  _completeCinematic(){
+    const cine=this.state.cinematic;
+    if(!cine) return;
+    const ca=cine.completionAction,cv=cine.completionValue;
+    this.state.cinematic=null;
+    switch(ca){
+      case 'navigate_scene':{
+        const s=this.project.scenes.find(s=>s.id===cv||s.name===cv);
+        if(s) this._loadScene(s.id);
+        break;
+      }
+      case 'show_dialog': this.state.dialogText=cv; break;
+      case 'set_variable':{
+        const i=cv.indexOf('=');
+        if(i!==-1) this.state.variables[cv.slice(0,i).trim()]=cv.slice(i+1).trim();
+        break;
+      }
+    }
+  }
+
+  _updateCinematic(dt){
+    const cine=this.state.cinematic;
+    if(!cine||cine.mode===null) return;
+    switch(cine.mode){
+      case 'walking_main':{
+        const char=this.state.character;
+        if(!char||!char.moving) this._advanceCinematicStep();
+        break;
+      }
+      case 'walking_npc':{
+        const npcId=cine.activeNpcId;
+        if(!npcId){this._advanceCinematicStep();break;}
+        const pos=cine.npcOverrides.get(npcId);
+        const target=cine.npcTargets.get(npcId);
+        if(!pos||!target){this._advanceCinematicStep();break;}
+        const dx=target.x-pos.x,dy=target.y-pos.y;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        const step=150*(dt/1000);
+        if(dist<=step){pos.x=target.x;pos.y=target.y;this._advanceCinematicStep();}
+        else{pos.x+=(dx/dist)*step;pos.y+=(dy/dist)*step;}
+        break;
+      }
+      case 'waiting':{
+        cine.waitMs-=dt;
+        if(cine.waitMs<=0) this._advanceCinematicStep();
+        break;
+      }
+      case 'action':{
+        cine.actionTimer-=dt;
+        if(cine.actionTimer<=0){cine.actionText=null;this._advanceCinematicStep();}
+        break;
+      }
+      case 'waiting_dialog': break;
+    }
+  }
+
+  _renderActionLabel(){
+    const cine=this.state.cinematic;
+    if(!cine||!cine.actionText) return;
+    const{canvas,ctx}=this;
+    const text=cine.actionText;
+    const fontSize=20;
+    ctx.font='bold '+fontSize+'px sans-serif';
+    const w=ctx.measureText(text).width+32,h=44;
+    const x=(canvas.width-w)/2,y=32;
+    ctx.fillStyle='rgba(0,0,0,0.75)';
+    ctx.beginPath();
+    ctx.roundRect(x,y,w,h,8);
+    ctx.fill();
+    ctx.strokeStyle='#f97316';
+    ctx.lineWidth=2;
+    ctx.stroke();
+    ctx.fillStyle='#fed7aa';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(text,canvas.width/2,y+h/2);
   }
 
   _getCharSheet(facing){

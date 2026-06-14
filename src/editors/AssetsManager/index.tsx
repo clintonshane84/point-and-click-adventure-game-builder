@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react'
-import { Upload, Trash2, Image, Music, Video, FileIcon } from 'lucide-react'
+import { Upload, Trash2, Image, Music, Video, FileIcon, Sparkles } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
+import { useAiStore } from '../../store/useAiStore'
+import { AiGenerateModal } from '../../components/AiGenerateModal'
 import type { Asset, AssetType } from '../../types'
 
 const ACCEPT: Record<AssetType, string> = {
@@ -25,9 +27,23 @@ function formatBytes(bytes?: number): string {
 export function AssetsManager() {
   const { project, addAsset, deleteAsset } = useGameStore()
   const { assets } = project
+  const { settings: aiSettings } = useAiStore()
 
   const [activeTab, setActiveTab] = useState<AssetType>('image')
+  const [showAiModal, setShowAiModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleAiGenerated = (dataUrl: string, prompt: string) => {
+    const asset: Asset = {
+      id: `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: `ai-image-${Date.now()}.png`,
+      type: 'image',
+      url: dataUrl,
+      createdAt: new Date().toISOString(),
+    }
+    addAsset(asset)
+    setShowAiModal(false)
+  }
 
   const filteredAssets = assets.filter((a) => a.type === activeTab)
 
@@ -58,12 +74,22 @@ export function AssetsManager() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 bg-gray-800 border-b border-gray-700">
         <h2 className="text-gray-100 font-semibold">Assets Manager</h2>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-medium"
-        >
-          <Upload size={16} /> Import {activeTab === 'image' ? 'Image' : activeTab === 'audio' ? 'Audio' : 'Video'}
-        </button>
+        <div className="flex items-center gap-2">
+          {aiSettings.enabled && activeTab === 'image' && (
+            <button
+              onClick={() => setShowAiModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-sm font-medium"
+            >
+              <Sparkles size={16} /> AI Generate
+            </button>
+          )}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-medium"
+          >
+            <Upload size={16} /> Import {activeTab === 'image' ? 'Image' : activeTab === 'audio' ? 'Audio' : 'Video'}
+          </button>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -94,6 +120,14 @@ export function AssetsManager() {
           </button>
         ))}
       </div>
+
+      {showAiModal && (
+        <AiGenerateModal
+          title="AI Generate Image"
+          onGenerated={handleAiGenerated}
+          onClose={() => setShowAiModal(false)}
+        />
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
