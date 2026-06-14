@@ -23,6 +23,7 @@ import type {
   FacingDirection,
   CharacterPlacement,
   BlockedZone,
+  ScaleZone,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -183,6 +184,11 @@ interface GameStore {
   addBlockedZone: (sceneId: string, zone: BlockedZone) => void
   updateBlockedZone: (sceneId: string, zoneId: string, updates: Partial<BlockedZone>) => void
   deleteBlockedZone: (sceneId: string, zoneId: string) => void
+
+  // Scale zone (perspective) actions
+  addScaleZone: (sceneId: string, zone: ScaleZone) => void
+  updateScaleZone: (sceneId: string, zoneId: string, updates: Partial<ScaleZone>) => void
+  deleteScaleZone: (sceneId: string, zoneId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -701,6 +707,50 @@ export const useGameStore = create<GameStore>((set) => ({
         scenes: state.project.scenes.map((s) =>
           s.id === sceneId
             ? { ...s, blockedZones: (s.blockedZones ?? []).filter((z) => z.id !== zoneId) }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addScaleZone: (sceneId, zone) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, scaleZones: [...(s.scaleZones ?? []), zone] }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateScaleZone: (sceneId, zoneId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? {
+                ...s,
+                scaleZones: (s.scaleZones ?? []).map((z) =>
+                  z.id === zoneId ? { ...z, ...updates } : z
+                ),
+              }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteScaleZone: (sceneId, zoneId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, scaleZones: (s.scaleZones ?? []).filter((z) => z.id !== zoneId) }
             : s
         ),
         updatedAt: new Date().toISOString(),

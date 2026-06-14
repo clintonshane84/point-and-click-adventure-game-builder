@@ -47,6 +47,17 @@ export interface BlockedZone {
   height: number
 }
 
+export interface ScaleZone {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  scale: number          // character size multiplier inside zone (0.1–1.0)
+  speedMultiplier: number // walk speed multiplier inside zone (0.1–1.0)
+}
+
 export interface CharacterAnimation {
   spriteSheetId: string
   animationId: string
@@ -84,6 +95,7 @@ export interface Scene {
   objects: SceneObject[]
   characterPlacement?: CharacterPlacement
   blockedZones?: BlockedZone[]
+  scaleZones?: ScaleZone[]
 }
 
 // Event types
