@@ -14,6 +14,10 @@ interface CharacterState {
   moving: boolean
   animFrame: number
   animTimer: number   // ms since last frame advance
+  scale: number       // current visual scale (lerps toward targetScale)
+  targetScale: number
+  speedMult: number   // current speed multiplier (lerps toward targetSpeedMult)
+  targetSpeedMult: number
 }
 
 interface GameState {
@@ -135,6 +139,10 @@ export class GameRuntime {
           moving: false,
           animFrame: this.getAnimStartFrame(facing),
           animTimer: 0,
+          scale: 1,
+          targetScale: 1,
+          speedMult: 1,
+          targetSpeedMult: 1,
         }
       } else {
         this.state.character = null
@@ -157,7 +165,10 @@ export class GameRuntime {
     this.lastFrameTime = now
     this.updateCharacter(dt)
     const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
-    if (scene) this.checkHotspots(scene)
+    if (scene) {
+      this.checkHotspots(scene)
+      this.checkScaleZones(scene)
+    }
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
   }
@@ -200,12 +211,45 @@ export class GameRuntime {
     }
   }
 
+  // ── Scale zone detection ──────────────────────────────────────────────────
+
+  private checkScaleZones(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    let targetScale = 1
+    let targetSpeedMult = 1
+
+    for (const zone of (scene.scaleZones ?? [])) {
+      if (fx >= zone.x && fx <= zone.x + zone.width &&
+          fy >= zone.y && fy <= zone.y + zone.height) {
+        targetScale = zone.scale
+        targetSpeedMult = zone.speedMultiplier
+        break
+      }
+    }
+
+    char.targetScale = targetScale
+    char.targetSpeedMult = targetSpeedMult
+  }
+
   // ── Character movement ────────────────────────────────────────────────────
 
   private updateCharacter(dt: number) {
     const char = this.state.character
     const mc = this.project.mainCharacter
-    if (!char || !char.moving || !mc) return
+    if (!char || !mc) return
+
+    // Smooth lerp toward zone target scale and speed
+    const lerpFactor = Math.min(1, dt * 3 / 1000)
+    char.scale += (char.targetScale - char.scale) * lerpFactor
+    char.speedMult += (char.targetSpeedMult - char.speedMult) * lerpFactor
+
+    if (!char.moving) return
 
     const target = char.waypoints[char.waypointIndex]
     if (!target) { char.moving = false; return }
@@ -237,7 +281,7 @@ export class GameRuntime {
       char.facing = dy > 0 ? 'down' : 'up'
     }
 
-    const step = CHAR_SPEED * (dt / 1000)
+    const step = CHAR_SPEED * char.speedMult * (dt / 1000)
     const ratio = Math.min(step / dist, 1)
     char.x += dx * ratio
     char.y += dy * ratio
@@ -386,6 +430,13 @@ export class GameRuntime {
     const cw = mc.width
     const ch = mc.height
 
+    // Scale character from feet anchor point
+    const scale = char.scale ?? 1
+    const scaledW = cw * scale
+    const scaledH = ch * scale
+    const renderX = Math.round(char.x + (cw - scaledW) / 2)
+    const renderY = Math.round(char.y + ch - scaledH)
+
     const sheet = this.getCharSheet(char.facing)
     const img = sheet ? this.imageCache.get(sheet.imageUrl) : null
 
@@ -396,18 +447,17 @@ export class GameRuntime {
         img,
         col * sheet.frameWidth, row * sheet.frameHeight,
         sheet.frameWidth, sheet.frameHeight,
-        Math.round(char.x), Math.round(char.y), cw, ch
+        renderX, renderY, scaledW, scaledH
       )
     } else {
-      // Fallback while image loads
       ctx.save()
       ctx.fillStyle = 'rgba(99,102,241,0.7)'
-      ctx.fillRect(char.x, char.y, cw, ch)
+      ctx.fillRect(renderX, renderY, scaledW, scaledH)
       ctx.fillStyle = '#fff'
-      ctx.font = `${Math.min(12, ch * 0.18)}px sans-serif`
+      ctx.font = `${Math.min(12, scaledH * 0.18)}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(mc.name ?? 'Player', char.x + cw / 2, char.y + ch / 2)
+      ctx.fillText(mc.name ?? 'Player', renderX + scaledW / 2, renderY + scaledH / 2)
       ctx.restore()
     }
   }

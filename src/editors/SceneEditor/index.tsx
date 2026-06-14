@@ -4,12 +4,12 @@ import type Konva from 'konva'
 import {
   Plus, Trash2, MousePointer, ChevronDown,
   ImageIcon, X, ZoomIn, ZoomOut,
-  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles,
+  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles, Shrink,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
 import { useAiStore } from '../../store/useAiStore'
 import { AiGenerateModal } from '../../components/AiGenerateModal'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, Asset } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -73,6 +73,7 @@ export function SceneEditor() {
     addSceneObject, updateSceneObject, deleteSceneObject,
     updateSceneCharacterPlacement,
     addBlockedZone, deleteBlockedZone,
+    addScaleZone, updateScaleZone, deleteScaleZone,
     addAsset,
   } = useGameStore()
   const { settings: aiSettings } = useAiStore()
@@ -123,6 +124,12 @@ export function SceneEditor() {
   const [drawingZone, setDrawingZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
   const isDrawingRef = useRef(false)
 
+  // Scale zone editing mode
+  const [scaleMode, setScaleMode] = useState(false)
+  const [selectedScaleZoneId, setSelectedScaleZoneId] = useState<string | null>(null)
+  const [drawingScaleZone, setDrawingScaleZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
+  const isDrawingScaleRef = useRef(false)
+
   const selectedObj = activeScene?.objects.find((o) => o.id === selectedObjId) ?? null
   const bgImage = useHtmlImage(activeScene?.backgroundImageUrl)
   const imageAssets = assets.filter((a) => a.type === 'image')
@@ -149,7 +156,12 @@ export function SceneEditor() {
         setSelectedZoneId(null)
         return
       }
-      if (!pathMode && selectedObjId) {
+      if (scaleMode && selectedScaleZoneId) {
+        deleteScaleZone(activeScene.id, selectedScaleZoneId)
+        setSelectedScaleZoneId(null)
+        return
+      }
+      if (!pathMode && !scaleMode && selectedObjId) {
         deleteSceneObject(activeScene.id, selectedObjId)
         setSelectedObjId(null)
         transformerRef.current?.nodes([])
@@ -157,7 +169,7 @@ export function SceneEditor() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedObjId, selectedZoneId, pathMode, activeScene, deleteSceneObject, deleteBlockedZone])
+  }, [selectedObjId, selectedZoneId, selectedScaleZoneId, pathMode, scaleMode, activeScene, deleteSceneObject, deleteBlockedZone, deleteScaleZone])
 
   // ── Scroll-wheel zoom (Ctrl/Cmd + scroll) ──────────────────────────────────
   useEffect(() => {
@@ -224,8 +236,11 @@ export function SceneEditor() {
   // ── Canvas interactions ────────────────────────────────────────────────────
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (pathMode) {
-      // Click on empty canvas in path mode → deselect zone
       if (e.target === e.target.getStage()) setSelectedZoneId(null)
+      return
+    }
+    if (scaleMode) {
+      if (e.target === e.target.getStage()) setSelectedScaleZoneId(null)
       return
     }
     if (e.target === e.target.getStage()) {
@@ -244,40 +259,67 @@ export function SceneEditor() {
   }, [activeScene, zoom])
 
   const handleStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!pathMode || !activeScene) return
-    // Only start drawing on the stage background, not on existing zones
+    if ((!pathMode && !scaleMode) || !activeScene) return
     if (e.target !== e.target.getStage()) return
     const pos = stageToScene()
     if (!pos) return
-    isDrawingRef.current = true
-    setDrawingZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
-    setSelectedZoneId(null)
-  }, [pathMode, activeScene, stageToScene])
+    if (pathMode) {
+      isDrawingRef.current = true
+      setDrawingZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
+      setSelectedZoneId(null)
+    } else {
+      isDrawingScaleRef.current = true
+      setDrawingScaleZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
+      setSelectedScaleZoneId(null)
+    }
+  }, [pathMode, scaleMode, activeScene, stageToScene])
 
   const handleStageMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!pathMode || !isDrawingRef.current) return
     const pos = stageToScene()
     if (!pos) return
-    setDrawingZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
-  }, [pathMode, stageToScene])
+    if (pathMode && isDrawingRef.current) {
+      setDrawingZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
+    } else if (scaleMode && isDrawingScaleRef.current) {
+      setDrawingScaleZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
+    }
+  }, [pathMode, scaleMode, stageToScene])
 
   const handleStageMouseUp = useCallback(() => {
-    if (!pathMode || !isDrawingRef.current || !drawingZone || !activeScene) return
-    isDrawingRef.current = false
-    const w = Math.abs(drawingZone.w), h = Math.abs(drawingZone.h)
-    if (w > 10 && h > 10) {
-      const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
-      const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
-      const zone: BlockedZone = {
-        id: `zone-${Date.now()}`,
-        label: `Block ${(activeScene.blockedZones?.length ?? 0) + 1}`,
-        x, y, width: w, height: h,
+    if (pathMode && isDrawingRef.current && drawingZone && activeScene) {
+      isDrawingRef.current = false
+      const w = Math.abs(drawingZone.w), h = Math.abs(drawingZone.h)
+      if (w > 10 && h > 10) {
+        const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
+        const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
+        const zone: BlockedZone = {
+          id: `zone-${Date.now()}`,
+          label: `Block ${(activeScene.blockedZones?.length ?? 0) + 1}`,
+          x, y, width: w, height: h,
+        }
+        addBlockedZone(activeScene.id, zone)
+        setSelectedZoneId(zone.id)
       }
-      addBlockedZone(activeScene.id, zone)
-      setSelectedZoneId(zone.id)
+      setDrawingZone(null)
     }
-    setDrawingZone(null)
-  }, [pathMode, drawingZone, activeScene, addBlockedZone])
+    if (scaleMode && isDrawingScaleRef.current && drawingScaleZone && activeScene) {
+      isDrawingScaleRef.current = false
+      const w = Math.abs(drawingScaleZone.w), h = Math.abs(drawingScaleZone.h)
+      if (w > 10 && h > 10) {
+        const x = drawingScaleZone.w < 0 ? drawingScaleZone.startX + drawingScaleZone.w : drawingScaleZone.startX
+        const y = drawingScaleZone.h < 0 ? drawingScaleZone.startY + drawingScaleZone.h : drawingScaleZone.startY
+        const zone: ScaleZone = {
+          id: `szn-${Date.now()}`,
+          label: `Scale ${(activeScene.scaleZones?.length ?? 0) + 1}`,
+          x, y, width: w, height: h,
+          scale: 0.5,
+          speedMultiplier: 0.5,
+        }
+        addScaleZone(activeScene.id, zone)
+        setSelectedScaleZoneId(zone.id)
+      }
+      setDrawingScaleZone(null)
+    }
+  }, [pathMode, scaleMode, drawingZone, drawingScaleZone, activeScene, addBlockedZone, addScaleZone])
 
   const handleObjectClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>, objId: string) => {
@@ -531,16 +573,36 @@ export function SceneEditor() {
 
           {/* Path mode toggle */}
           <button
-            onClick={() => { setPathMode((v) => !v); setSelectedObjId(null); setSelectedZoneId(null); setDrawingZone(null) }}
+            onClick={() => {
+              const next = !pathMode
+              setPathMode(next)
+              if (next) setScaleMode(false)
+              setSelectedObjId(null); setSelectedZoneId(null); setSelectedScaleZoneId(null); setDrawingZone(null); setDrawingScaleZone(null)
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              pathMode
-                ? 'bg-red-700 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              pathMode ? 'bg-red-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
             }`}
             title="Toggle path/blocking editor"
           >
             <ShieldOff size={14} />
             {pathMode ? 'Pathing (ON)' : 'Pathing'}
+          </button>
+
+          {/* Scale zone mode toggle */}
+          <button
+            onClick={() => {
+              const next = !scaleMode
+              setScaleMode(next)
+              if (next) setPathMode(false)
+              setSelectedObjId(null); setSelectedZoneId(null); setSelectedScaleZoneId(null); setDrawingZone(null); setDrawingScaleZone(null)
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+              scaleMode ? 'bg-teal-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+            title="Toggle scale/perspective zones editor"
+          >
+            <Shrink size={14} />
+            {scaleMode ? 'Scale Zones (ON)' : 'Scale Zones'}
           </button>
 
           {pathMode && selectedZoneId && (
@@ -552,9 +614,24 @@ export function SceneEditor() {
             </button>
           )}
 
+          {scaleMode && selectedScaleZoneId && (
+            <button
+              onClick={() => { if (activeScene) deleteScaleZone(activeScene.id, selectedScaleZoneId); setSelectedScaleZoneId(null) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-teal-700 hover:bg-teal-600 text-white"
+            >
+              <Trash2 size={14} /> Delete Scale Zone
+            </button>
+          )}
+
           {pathMode && (
             <span className="text-xs text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-700/30">
               Click &amp; drag to draw blocked zones · Click zone to select · Del to remove
+            </span>
+          )}
+
+          {scaleMode && (
+            <span className="text-xs text-teal-400 bg-teal-900/20 px-2 py-1 rounded border border-teal-700/30">
+              Click &amp; drag to draw scale zones · Click zone to set shrink &amp; speed · Del to remove
             </span>
           )}
 
@@ -596,8 +673,9 @@ export function SceneEditor() {
 
           <span className="text-xs text-gray-600 pl-2 border-l border-gray-700">
             {activeScene?.name} — {activeScene?.width}×{activeScene?.height}
-            {!pathMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
+            {!pathMode && !scaleMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
             {pathMode && <span className="ml-2 text-red-400">{activeScene?.blockedZones?.length ?? 0} blocked zone{(activeScene?.blockedZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
+            {scaleMode && <span className="ml-2 text-teal-400">{activeScene?.scaleZones?.length ?? 0} scale zone{(activeScene?.scaleZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
           </span>
         </div>
 
@@ -824,7 +902,7 @@ export function SceneEditor() {
                     />
                   ))}
 
-                  {/* Drawing preview */}
+                  {/* Drawing preview — blocked zone */}
                   {pathMode && drawingZone && (() => {
                     const x = drawingZone.w < 0 ? drawingZone.startX + drawingZone.w : drawingZone.startX
                     const y = drawingZone.h < 0 ? drawingZone.startY + drawingZone.h : drawingZone.startY
@@ -834,6 +912,53 @@ export function SceneEditor() {
                         width={Math.abs(drawingZone.w)} height={Math.abs(drawingZone.h)}
                         fill="rgba(239,68,68,0.25)"
                         stroke="#ef4444"
+                        strokeWidth={2}
+                        dash={[5, 3]}
+                        listening={false}
+                      />
+                    )
+                  })()}
+
+                  {/* Scale zones */}
+                  {(activeScene.scaleZones ?? []).map((zone) => {
+                    const isSel = zone.id === selectedScaleZoneId
+                    return (
+                      <Rect
+                        key={zone.id}
+                        x={zone.x} y={zone.y}
+                        width={zone.width} height={zone.height}
+                        fill={isSel ? 'rgba(20,184,166,0.30)' : 'rgba(20,184,166,0.12)'}
+                        stroke={isSel ? '#14b8a6' : '#5eead4'}
+                        strokeWidth={isSel ? 2.5 : 1.5}
+                        dash={isSel ? undefined : [6, 3]}
+                        listening={scaleMode}
+                        onClick={scaleMode ? (e) => { e.cancelBubble = true; setSelectedScaleZoneId(zone.id) } : undefined}
+                      />
+                    )
+                  })}
+
+                  {/* Scale zone labels — shown when scale mode is on */}
+                  {scaleMode && (activeScene.scaleZones ?? []).map((zone) => (
+                    <Text
+                      key={`lbl-sz-${zone.id}`}
+                      x={zone.x + 4} y={zone.y + 4}
+                      text={`${zone.label} ×${zone.scale} spd×${zone.speedMultiplier}`}
+                      fontSize={10}
+                      fill="#5eead4"
+                      listening={false}
+                    />
+                  ))}
+
+                  {/* Drawing preview — scale zone */}
+                  {scaleMode && drawingScaleZone && (() => {
+                    const x = drawingScaleZone.w < 0 ? drawingScaleZone.startX + drawingScaleZone.w : drawingScaleZone.startX
+                    const y = drawingScaleZone.h < 0 ? drawingScaleZone.startY + drawingScaleZone.h : drawingScaleZone.startY
+                    return (
+                      <Rect
+                        x={x} y={y}
+                        width={Math.abs(drawingScaleZone.w)} height={Math.abs(drawingScaleZone.h)}
+                        fill="rgba(20,184,166,0.20)"
+                        stroke="#14b8a6"
                         strokeWidth={2}
                         dash={[5, 3]}
                         listening={false}
@@ -858,9 +983,79 @@ export function SceneEditor() {
       <div className="w-56 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-gray-700">
           <span className="text-gray-300 text-sm font-semibold">
-            {pathMode ? 'Blocked Zone' : 'Properties'}
+            {pathMode ? 'Blocked Zone' : scaleMode ? 'Scale Zone' : 'Properties'}
           </span>
         </div>
+
+        {/* Scale zone mode: show selected scale zone properties */}
+        {scaleMode && (() => {
+          const zone = (activeScene?.scaleZones ?? []).find((z) => z.id === selectedScaleZoneId)
+          if (!zone || !activeScene) return (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <p className="text-gray-500 text-xs text-center leading-relaxed">
+                Click &amp; drag on the canvas to create a scale zone.<br />
+                <span className="text-gray-600">Click an existing zone to edit it.</span>
+              </p>
+            </div>
+          )
+          return (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Label</label>
+                <input
+                  type="text"
+                  value={zone.label}
+                  onChange={(e) => updateScaleZone(activeScene.id, zone.id, { label: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Scale — {(zone.scale * 100).toFixed(0)}%
+                </label>
+                <input
+                  type="range" min={0.1} max={1} step={0.05}
+                  value={zone.scale}
+                  onChange={(e) => updateScaleZone(activeScene.id, zone.id, { scale: parseFloat(e.target.value) })}
+                  className="w-full accent-teal-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Speed — {(zone.speedMultiplier * 100).toFixed(0)}%
+                </label>
+                <input
+                  type="range" min={0.1} max={1} step={0.05}
+                  value={zone.speedMultiplier}
+                  onChange={(e) => updateScaleZone(activeScene.id, zone.id, { speedMultiplier: parseFloat(e.target.value) })}
+                  className="w-full accent-teal-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(['x', 'y', 'width', 'height'] as const).map((prop) => (
+                  <div key={prop}>
+                    <label className="text-xs text-gray-400 block mb-1 uppercase">{prop === 'width' ? 'W' : prop === 'height' ? 'H' : prop.toUpperCase()}</label>
+                    <input
+                      type="number"
+                      value={Math.round(zone[prop])}
+                      onChange={(e) => updateScaleZone(activeScene.id, zone.id, { [prop]: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => { deleteScaleZone(activeScene.id, zone.id); setSelectedScaleZoneId(null) }}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm bg-teal-800 hover:bg-teal-700 text-white mt-2"
+              >
+                <Trash2 size={13} /> Delete Zone
+              </button>
+              <p className="text-xs text-teal-400/70 bg-teal-900/10 rounded p-2">
+                Character shrinks and slows inside this zone to simulate perspective depth.
+              </p>
+            </div>
+          )
+        })()}
 
         {/* Path mode: show selected zone properties */}
         {pathMode && (() => {
@@ -914,7 +1109,7 @@ export function SceneEditor() {
           )
         })()}
 
-        {selectedObj && activeScene && !pathMode ? (
+        {selectedObj && activeScene && !pathMode && !scaleMode ? (
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
 
             {/* Name */}
@@ -1089,7 +1284,7 @@ export function SceneEditor() {
               </p>
             )}
           </div>
-        ) : !pathMode ? (
+        ) : !pathMode && !scaleMode ? (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-gray-500 text-xs text-center px-4 leading-relaxed">
               Select an object to edit its properties.<br />

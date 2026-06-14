@@ -167,6 +167,7 @@ export class GameEngine {
           waypoints: [], waypointIndex: 0,
           facing, moving: false,
           animFrame: this._getAnimStartFrame(facing), animTimer: 0,
+          scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
         };
       } else { this.state.character = null; }
     }
@@ -183,7 +184,7 @@ export class GameEngine {
     this.lastFrameTime = now;
     this._updateCharacter(dt);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-    if(scene) this._checkHotspots(scene);
+    if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);}
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
   }
@@ -210,9 +211,24 @@ export class GameEngine {
     }
   }
 
+  _checkScaleZones(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    let ts=1,tm=1;
+    for(const z of (scene.scaleZones||[])){
+      if(fx>=z.x&&fx<=z.x+z.width&&fy>=z.y&&fy<=z.y+z.height){ts=z.scale;tm=z.speedMultiplier;break;}
+    }
+    char.targetScale=ts; char.targetSpeedMult=tm;
+  }
+
   _updateCharacter(dt) {
     const char = this.state.character, mc = this.project.mainCharacter;
-    if (!char || !char.moving || !mc) return;
+    if (!char || !mc) return;
+    const lf=Math.min(1,dt*3/1000);
+    char.scale+=(char.targetScale-char.scale)*lf;
+    char.speedMult+=(char.targetSpeedMult-char.speedMult)*lf;
+    if (!char.moving) return;
     const target = char.waypoints[char.waypointIndex];
     if (!target) { char.moving = false; return; }
     const tx = target.x - mc.width/2, ty = target.y - mc.height/2;
@@ -227,7 +243,7 @@ export class GameEngine {
     }
     if (Math.abs(dx) >= Math.abs(dy)) { char.facing = dx>0?'right':'left'; }
     else { char.facing = dy>0?'down':'up'; }
-    const step = CHAR_SPEED*(dt/1000), ratio = Math.min(step/dist,1);
+    const step = CHAR_SPEED*char.speedMult*(dt/1000), ratio = Math.min(step/dist,1);
     char.x += dx*ratio; char.y += dy*ratio;
     const anim = this._getCharAnim(char.facing);
     if (anim && anim.fps > 0) {
@@ -298,19 +314,21 @@ export class GameEngine {
     const char=this.state.character, mc=this.project.mainCharacter;
     if (!char||!mc) return;
     const {ctx}=this, cw=mc.width, ch=mc.height;
+    const scale=char.scale??1;
+    const sw=cw*scale, sh=ch*scale;
+    const rx=Math.round(char.x+(cw-sw)/2), ry=Math.round(char.y+ch-sh);
     const sheet=this._getCharSheet(char.facing);
     const img=sheet?this.imageCache.get(sheet.imageUrl):null;
     if (img&&sheet) {
       const col=char.animFrame%sheet.cols, row=Math.floor(char.animFrame/sheet.cols);
-      ctx.drawImage(img,col*sheet.frameWidth,row*sheet.frameHeight,sheet.frameWidth,sheet.frameHeight,
-        Math.round(char.x),Math.round(char.y),cw,ch);
+      ctx.drawImage(img,col*sheet.frameWidth,row*sheet.frameHeight,sheet.frameWidth,sheet.frameHeight,rx,ry,sw,sh);
     } else {
       ctx.save();
       ctx.fillStyle='rgba(99,102,241,0.7)';
-      ctx.fillRect(char.x,char.y,cw,ch);
-      ctx.fillStyle='#fff'; ctx.font=Math.min(12,ch*0.18)+'px sans-serif';
+      ctx.fillRect(rx,ry,sw,sh);
+      ctx.fillStyle='#fff'; ctx.font=Math.min(12,sh*0.18)+'px sans-serif';
       ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(mc.name||'Player',char.x+cw/2,char.y+ch/2);
+      ctx.fillText(mc.name||'Player',rx+sw/2,ry+sh/2);
       ctx.restore();
     }
   }
