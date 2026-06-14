@@ -221,6 +221,11 @@ export const useGameStore = create<GameStore>((set) => ({
     set({
       project: {
         ...project,
+        scenes: project.scenes.map((s) => ({
+          ...s,
+          blockedZones: s.blockedZones ?? [],
+          scaleZones: s.scaleZones ?? [],
+        })),
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
         npcs: project.npcs ?? [],
         cinematics: project.cinematics ?? [],
