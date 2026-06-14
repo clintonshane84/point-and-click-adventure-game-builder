@@ -6,7 +6,7 @@ import {
 import { useGameStore } from '../store/useGameStore'
 import {
   saveProject, loadProject,
-  autoSave, getAutoSave, clearAutoSave,
+  autoSave, autoSaveToFile, getAutoSave, clearAutoSave,
   getSavedDirectoryName, changeProjectDirectory,
   fsaSupported,
 } from '../lib/fileSystemStorage'
@@ -60,10 +60,11 @@ export function SaveLoadBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Auto-save every 60 s
+  // Auto-save every 60 s — localStorage always, FSA file if permission is held
   useEffect(() => {
     const id = setInterval(() => {
       autoSave(project)
+      autoSaveToFile(project)
       setLastAutoSave(new Date().toISOString())
     }, 60_000)
     return () => clearInterval(id)

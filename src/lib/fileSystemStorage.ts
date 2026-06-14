@@ -213,13 +213,36 @@ async function parseProjectFile(file: File): Promise<LoadResult> {
   }
 }
 
-// ── Auto-save (localStorage) ──────────────────────────────────────────────────
+// ── Auto-save ─────────────────────────────────────────────────────────────────
 
+/** Write to localStorage. Always called as part of every auto-save. */
 export function autoSave(project: GameProject): void {
   try {
     localStorage.setItem(LS_PROJECT_KEY, JSON.stringify(project))
     localStorage.setItem(LS_TIME_KEY, new Date().toISOString())
   } catch { /* quota exceeded — silently skip */ }
+}
+
+/**
+ * Silently write to the previously chosen FSA directory, if permission is
+ * already granted. Never opens a picker — returns false if no handle exists
+ * or permission has lapsed, so the caller can fall back to localStorage only.
+ */
+export async function autoSaveToFile(project: GameProject): Promise<boolean> {
+  if (!fsaSupported) return false
+  try {
+    const handle = await getSavedDirHandle()
+    if (!handle) return false
+    // Do NOT call requestPermission here — we never want to prompt mid-session.
+    const perm = await handle.queryPermission({ mode: 'readwrite' })
+    if (perm !== 'granted') return false
+    const filename = `${slugify(project.name || 'my-adventure-game')}.agb.json`
+    const fileHandle = await handle.getFileHandle(filename, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(JSON.stringify(project, null, 2))
+    await writable.close()
+    return true
+  } catch { return false }
 }
 
 export interface AutoSaveData {
