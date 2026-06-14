@@ -6,6 +6,7 @@ export type EditorType =
   | 'ui'
   | 'sprite'
   | 'character'
+  | 'cinematic'
   | 'settings'
   | 'titlescreen'
   | 'stage'
@@ -126,6 +127,7 @@ export type ActionType =
   | 'hide_object'
   | 'play_animation'
   | 'stop_animation'
+  | 'play_cinematic'
 
 export interface EventAction {
   id: string
@@ -311,6 +313,45 @@ export interface CursorConfig {
   activeState: CursorStateName
 }
 
+// Cinematic types
+export type CinematicStepType =
+  | 'walk_to'
+  | 'talk'
+  | 'action'
+  | 'wait'
+  | 'show_dialog'
+  | 'set_variable'
+  | 'play_sound'
+
+export interface CinematicStep {
+  id: string
+  type: CinematicStepType
+  characterId?: string   // 'main-character' or NPC id
+  targetX?: number       // walk_to
+  targetY?: number       // walk_to
+  text?: string          // talk / show_dialog
+  actionLabel?: string   // action (e.g. "attacks", "gives gift")
+  duration?: number      // wait (seconds)
+  assetId?: string       // play_sound
+  variable?: string      // set_variable (name=value)
+}
+
+export type CinematicCompletionAction =
+  | 'return_to_game'
+  | 'navigate_scene'
+  | 'show_dialog'
+  | 'set_variable'
+
+export interface Cinematic {
+  id: string
+  name: string
+  description: string
+  sceneId: string
+  steps: CinematicStep[]
+  completionAction: CinematicCompletionAction
+  completionValue: string
+}
+
 // Top-level project
 export interface GameProject {
   id: string
@@ -325,6 +366,7 @@ export interface GameProject {
   spriteSheets: SpriteSheet[]
   mainCharacter: MainCharacter
   npcs: NpcCharacter[]
+  cinematics: Cinematic[]
   settings: GameSettings
   titleScreen: TitleScreenConfig
   stages: Stage[]

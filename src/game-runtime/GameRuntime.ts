@@ -1,6 +1,7 @@
 import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
-  FacingDirection, SpriteSheet, Animation, NpcCharacter,
+  FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
+  CinematicCompletionAction,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -20,6 +21,27 @@ interface CharacterState {
   targetSpeedMult: number
 }
 
+type CinematicMode =
+  | 'walking_main'   // waiting for main character to finish walk
+  | 'walking_npc'    // waiting for NPC to reach target
+  | 'waiting'        // countdown timer
+  | 'action'         // showing action label countdown
+  | 'waiting_dialog' // waiting for dialog click
+
+interface CinematicPlayState {
+  steps: CinematicStep[]
+  stepIndex: number
+  mode: CinematicMode | null
+  waitMs: number
+  npcOverrides: Map<string, { x: number; y: number }>
+  npcTargets: Map<string, { x: number; y: number }>
+  activeNpcId: string | null
+  actionText: string | null
+  actionTimer: number
+  completionAction: CinematicCompletionAction
+  completionValue: string
+}
+
 interface GameState {
   currentSceneId: string
   variables: Record<string, string | number | boolean>
@@ -29,6 +51,7 @@ interface GameState {
   dialogCallback: (() => void) | null
   character: CharacterState | null
   activeHotspots: Set<string>
+  cinematic: CinematicPlayState | null
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -66,6 +89,7 @@ export class GameRuntime {
       dialogCallback: null,
       character: null,
       activeHotspots: new Set(),
+      cinematic: null,
     }
   }
 
@@ -180,6 +204,7 @@ export class GameRuntime {
       this.checkHotspots(scene)
       this.checkScaleZones(scene)
     }
+    if (this.state.cinematic) this.updateCinematic(dt)
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
   }
@@ -246,6 +271,231 @@ export class GameRuntime {
 
     char.targetScale = targetScale
     char.targetSpeedMult = targetSpeedMult
+  }
+
+  // ── Cinematic execution ───────────────────────────────────────────────────
+
+  private playCinematic(cinematicId: string) {
+    const cinematic = (this.project.cinematics ?? []).find((c) => c.id === cinematicId)
+    if (!cinematic || cinematic.steps.length === 0) return
+    // Load the cinematic's scene if needed
+    if (cinematic.sceneId && cinematic.sceneId !== this.state.currentSceneId) {
+      this.loadScene(cinematic.sceneId)
+    }
+    this.state.cinematic = {
+      steps: cinematic.steps,
+      stepIndex: 0,
+      mode: null,
+      waitMs: 0,
+      npcOverrides: new Map(),
+      npcTargets: new Map(),
+      activeNpcId: null,
+      actionText: null,
+      actionTimer: 0,
+      completionAction: cinematic.completionAction,
+      completionValue: cinematic.completionValue,
+    }
+    this.executeCinematicStep(cinematic.steps[0])
+  }
+
+  private executeCinematicStep(step: CinematicStep) {
+    const cine = this.state.cinematic
+    if (!cine) return
+    cine.actionText = null
+    cine.activeNpcId = null
+
+    switch (step.type) {
+      case 'walk_to': {
+        if (!step.characterId || step.characterId === 'main-character') {
+          // Move main character via pathfinding
+          const char = this.state.character
+          const mc = this.project.mainCharacter
+          const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+          if (char && mc && scene) {
+            const path = findPath(
+              scene.blockedZones ?? [], scene.width, scene.height,
+              char.x + mc.width / 2, char.y + mc.height / 2,
+              step.targetX ?? 0, step.targetY ?? 0,
+              mc.width, mc.height,
+            )
+            if (path.length > 0) {
+              char.waypoints = path
+              char.waypointIndex = 0
+              char.moving = true
+            }
+          }
+          cine.mode = 'walking_main'
+        } else {
+          // Move NPC linearly
+          const npcId = step.characterId
+          const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+          const npcObj = scene?.objects.find((o) => o.type === 'character' && o.npcId === npcId)
+          const start = cine.npcOverrides.get(npcId) ?? { x: npcObj?.x ?? 0, y: npcObj?.y ?? 0 }
+          cine.npcOverrides.set(npcId, { ...start })
+          cine.npcTargets.set(npcId, { x: step.targetX ?? 0, y: step.targetY ?? 0 })
+          cine.activeNpcId = npcId
+          cine.mode = 'walking_npc'
+        }
+        break
+      }
+      case 'talk': {
+        const npc = step.characterId && step.characterId !== 'main-character'
+          ? (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === step.characterId)
+          : null
+        const speaker = npc?.name ?? this.project.mainCharacter.name ?? 'Player'
+        this.state.dialogText = `[${speaker}]: ${step.text ?? ''}`
+        this.state.dialogCallback = () => this.advanceCinematicStep()
+        cine.mode = 'waiting_dialog'
+        break
+      }
+      case 'show_dialog': {
+        this.state.dialogText = step.text ?? ''
+        this.state.dialogCallback = () => this.advanceCinematicStep()
+        cine.mode = 'waiting_dialog'
+        break
+      }
+      case 'action': {
+        const npc = step.characterId && step.characterId !== 'main-character'
+          ? (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === step.characterId)
+          : null
+        const actor = npc?.name ?? this.project.mainCharacter.name ?? 'Player'
+        cine.actionText = `${actor} ${step.actionLabel ?? 'performs action'}`
+        cine.actionTimer = 2000
+        cine.mode = 'action'
+        break
+      }
+      case 'wait': {
+        cine.waitMs = (step.duration ?? 1) * 1000
+        cine.mode = 'waiting'
+        break
+      }
+      case 'set_variable': {
+        if (step.variable) {
+          const i = step.variable.indexOf('=')
+          if (i !== -1) {
+            this.state.variables[step.variable.slice(0, i).trim()] = step.variable.slice(i + 1).trim()
+          }
+        }
+        this.advanceCinematicStep()
+        break
+      }
+      case 'play_sound': {
+        // Sound playback not yet implemented in runtime
+        this.advanceCinematicStep()
+        break
+      }
+    }
+  }
+
+  private advanceCinematicStep() {
+    const cine = this.state.cinematic
+    if (!cine) return
+    cine.stepIndex++
+    if (cine.stepIndex >= cine.steps.length) {
+      this.completeCinematic()
+      return
+    }
+    this.executeCinematicStep(cine.steps[cine.stepIndex])
+  }
+
+  private completeCinematic() {
+    const cine = this.state.cinematic
+    if (!cine) return
+    const { completionAction, completionValue } = cine
+    this.state.cinematic = null
+    switch (completionAction) {
+      case 'navigate_scene': {
+        const scene = this.project.scenes.find((s) => s.id === completionValue || s.name === completionValue)
+        if (scene) this.loadScene(scene.id)
+        break
+      }
+      case 'show_dialog': {
+        this.state.dialogText = completionValue
+        break
+      }
+      case 'set_variable': {
+        const i = completionValue.indexOf('=')
+        if (i !== -1) {
+          this.state.variables[completionValue.slice(0, i).trim()] = completionValue.slice(i + 1).trim()
+        }
+        break
+      }
+      case 'return_to_game':
+      default:
+        break
+    }
+  }
+
+  private updateCinematic(dt: number) {
+    const cine = this.state.cinematic
+    if (!cine || cine.mode === null) return
+
+    switch (cine.mode) {
+      case 'walking_main': {
+        const char = this.state.character
+        if (!char || !char.moving) this.advanceCinematicStep()
+        break
+      }
+      case 'walking_npc': {
+        const npcId = cine.activeNpcId
+        if (!npcId) { this.advanceCinematicStep(); break }
+        const pos = cine.npcOverrides.get(npcId)
+        const target = cine.npcTargets.get(npcId)
+        if (!pos || !target) { this.advanceCinematicStep(); break }
+        const dx = target.x - pos.x
+        const dy = target.y - pos.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        const step = 150 * (dt / 1000)
+        if (dist <= step) {
+          pos.x = target.x
+          pos.y = target.y
+          this.advanceCinematicStep()
+        } else {
+          pos.x += (dx / dist) * step
+          pos.y += (dy / dist) * step
+        }
+        break
+      }
+      case 'waiting': {
+        cine.waitMs -= dt
+        if (cine.waitMs <= 0) this.advanceCinematicStep()
+        break
+      }
+      case 'action': {
+        cine.actionTimer -= dt
+        if (cine.actionTimer <= 0) {
+          cine.actionText = null
+          this.advanceCinematicStep()
+        }
+        break
+      }
+      case 'waiting_dialog':
+        break  // handled by dialogCallback
+    }
+  }
+
+  private renderActionLabel() {
+    const cine = this.state.cinematic
+    if (!cine?.actionText) return
+    const { canvas, ctx } = this
+    const text = cine.actionText
+    const fontSize = 20
+    ctx.font = `bold ${fontSize}px sans-serif`
+    const w = ctx.measureText(text).width + 32
+    const h = 44
+    const x = (canvas.width - w) / 2
+    const y = 32
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 8)
+    ctx.fill()
+    ctx.strokeStyle = '#f97316'
+    ctx.lineWidth = 2
+    ctx.stroke()
+    ctx.fillStyle = '#fed7aa'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, canvas.width / 2, y + h / 2)
   }
 
   // ── Character movement ────────────────────────────────────────────────────
@@ -338,6 +588,7 @@ export class GameRuntime {
     ctx.restore()
 
     if (this.state.dialogText) this.renderDialog()
+    if (this.state.cinematic?.actionText) this.renderActionLabel()
   }
 
   private renderScene(scene: Scene) {
@@ -381,6 +632,15 @@ export class GameRuntime {
     const { ctx } = this
     ctx.save()
     ctx.globalAlpha = obj.opacity
+
+    // Apply cinematic NPC position override
+    const npcOverride = (obj.type === 'character' && obj.npcId && this.state.cinematic)
+      ? this.state.cinematic.npcOverrides.get(obj.npcId)
+      : undefined
+    if (npcOverride) {
+      // Temporarily patch obj for rendering (shadow copy to avoid mutation)
+      obj = { ...obj, x: npcOverride.x, y: npcOverride.y }
+    }
 
     if (obj.spriteSheetId) {
       const sheet = this.project.spriteSheets?.find((s) => s.id === obj.spriteSheetId)
@@ -661,6 +921,10 @@ export class GameRuntime {
         if (asset?.url) {
           new Audio(asset.url).play().catch(() => {})
         }
+        break
+      }
+      case 'play_cinematic': {
+        this.playCinematic(action.value)
         break
       }
     }

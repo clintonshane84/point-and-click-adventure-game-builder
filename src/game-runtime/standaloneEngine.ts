@@ -114,6 +114,7 @@ export class GameEngine {
       dialogCallback: null,
       character: null,
       activeHotspots: new Set(),
+      cinematic: null,
     };
   }
 
@@ -192,6 +193,7 @@ export class GameEngine {
     this._updateCharacter(dt);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
     if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);}
+    if(this.state.cinematic) this._updateCinematic(dt);
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
   }
@@ -289,16 +291,19 @@ export class GameEngine {
       const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
       if(!vis) continue;
       if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
-      ctx.save(); ctx.globalAlpha=obj.opacity;
-      const ssSheet=obj.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===obj.spriteSheetId):null;
+      let ro=obj;
+      const _ov=obj.type==='character'&&obj.npcId&&this.state.cinematic?this.state.cinematic.npcOverrides.get(obj.npcId):null;
+      if(_ov) ro=Object.assign({},obj,{x:_ov.x,y:_ov.y});
+      ctx.save(); ctx.globalAlpha=ro.opacity;
+      const ssSheet=ro.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===ro.spriteSheetId):null;
       const ssImg=ssSheet?this.imageCache.get(ssSheet.imageUrl):null;
       if(ssImg&&ssSheet){
-        const fi=obj.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
-        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,obj.x,obj.y,obj.width,obj.height);
+        const fi=ro.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
+        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,ro.x,ro.y,ro.width,ro.height);
         ctx.restore(); continue;
       }
-      if(obj.type==='character'&&obj.npcId){
-        const npc=(this.project.npcs||[]).find(n=>n.id===obj.npcId);
+      if(ro.type==='character'&&ro.npcId){
+        const npc=(this.project.npcs||[]).find(n=>n.id===ro.npcId);
         if(npc){
           const fa=npc.animations[npc.defaultFacing];
           if(fa?.spriteSheetId){
@@ -308,24 +313,24 @@ export class GameEngine {
               if(nim){
                 const adef=nsh.animations.find(a=>a.id===fa.animationId);
                 const fi=adef?.startFrame??0,col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
-                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,obj.x,obj.y,obj.width,obj.height);
+                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,ro.x,ro.y,ro.width,ro.height);
                 ctx.restore(); continue;
               }
             }
           }
         }
       }
-      const img=obj.imageUrl?this.imageCache.get(obj.imageUrl):null;
+      const img=ro.imageUrl?this.imageCache.get(ro.imageUrl):null;
       if(img){
-        ctx.drawImage(img,obj.x,obj.y,obj.width,obj.height);
+        ctx.drawImage(img,ro.x,ro.y,ro.width,ro.height);
       } else {
         const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b'};
-        ctx.fillStyle=colors[obj.type]||'#4f46e5';
-        ctx.fillRect(obj.x,obj.y,obj.width,obj.height);
-        if(obj.type!=='hotspot'){
+        ctx.fillStyle=colors[ro.type]||'#4f46e5';
+        ctx.fillRect(ro.x,ro.y,ro.width,ro.height);
+        if(ro.type!=='hotspot'){
           ctx.fillStyle='#fff'; ctx.font='14px sans-serif';
           ctx.textAlign='center'; ctx.textBaseline='middle';
-          ctx.fillText(obj.name,obj.x+obj.width/2,obj.y+obj.height/2);
+          ctx.fillText(ro.name,ro.x+ro.width/2,ro.y+ro.height/2);
         }
       }
       ctx.restore();
@@ -333,6 +338,7 @@ export class GameEngine {
     if(!charDrawn) this._renderCharacter();
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
+    if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
   }
 
   _renderCharacter() {
@@ -447,7 +453,181 @@ export class GameEngine {
         if(a?.url) new Audio(a.url).play().catch(()=>{});
         break;
       }
+      case 'play_cinematic': this._playCinematic(action.value); break;
     }
+  }
+
+  _playCinematic(cinematicId){
+    const cine=(this.project.cinematics||[]).find(c=>c.id===cinematicId);
+    if(!cine||cine.steps.length===0) return;
+    if(cine.sceneId&&cine.sceneId!==this.state.currentSceneId) this._loadScene(cine.sceneId);
+    this.state.cinematic={
+      steps:cine.steps,
+      stepIndex:0,
+      mode:null,
+      waitMs:0,
+      npcOverrides:new Map(),
+      npcTargets:new Map(),
+      activeNpcId:null,
+      actionText:null,
+      actionTimer:0,
+      completionAction:cine.completionAction,
+      completionValue:cine.completionValue,
+    };
+    this._executeCinematicStep(cine.steps[0]);
+  }
+
+  _executeCinematicStep(step){
+    const cine=this.state.cinematic;
+    if(!cine) return;
+    cine.actionText=null;
+    cine.activeNpcId=null;
+    switch(step.type){
+      case 'walk_to':{
+        if(!step.characterId||step.characterId==='main-character'){
+          const char=this.state.character,mc=this.project.mainCharacter;
+          const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+          if(char&&mc&&scene){
+            const path=findPath(scene.blockedZones||[],scene.width,scene.height,
+              char.x+mc.width/2,char.y+mc.height/2,step.targetX??0,step.targetY??0,mc.width,mc.height);
+            if(path.length>0){char.waypoints=path;char.waypointIndex=0;char.moving=true;}
+          }
+          cine.mode='walking_main';
+        } else {
+          const npcId=step.characterId;
+          const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+          const npcObj=scene?.objects.find(o=>o.type==='character'&&o.npcId===npcId);
+          const start=cine.npcOverrides.get(npcId)??{x:npcObj?.x??0,y:npcObj?.y??0};
+          cine.npcOverrides.set(npcId,{...start});
+          cine.npcTargets.set(npcId,{x:step.targetX??0,y:step.targetY??0});
+          cine.activeNpcId=npcId;
+          cine.mode='walking_npc';
+        }
+        break;
+      }
+      case 'talk':{
+        const npc=step.characterId&&step.characterId!=='main-character'?(this.project.npcs||[]).find(n=>n.id===step.characterId):null;
+        const speaker=npc?.name??(this.project.mainCharacter?.name??'Player');
+        this.state.dialogText='['+speaker+']: '+(step.text??'');
+        this.state.dialogCallback=()=>this._advanceCinematicStep();
+        cine.mode='waiting_dialog';
+        break;
+      }
+      case 'show_dialog':{
+        this.state.dialogText=step.text??'';
+        this.state.dialogCallback=()=>this._advanceCinematicStep();
+        cine.mode='waiting_dialog';
+        break;
+      }
+      case 'action':{
+        const npc=step.characterId&&step.characterId!=='main-character'?(this.project.npcs||[]).find(n=>n.id===step.characterId):null;
+        const actor=npc?.name??(this.project.mainCharacter?.name??'Player');
+        cine.actionText=actor+' '+(step.actionLabel??'performs action');
+        cine.actionTimer=2000;
+        cine.mode='action';
+        break;
+      }
+      case 'wait':{
+        cine.waitMs=(step.duration??1)*1000;
+        cine.mode='waiting';
+        break;
+      }
+      case 'set_variable':{
+        if(step.variable){
+          const i=step.variable.indexOf('=');
+          if(i!==-1) this.state.variables[step.variable.slice(0,i).trim()]=step.variable.slice(i+1).trim();
+        }
+        this._advanceCinematicStep();
+        break;
+      }
+      case 'play_sound': this._advanceCinematicStep(); break;
+    }
+  }
+
+  _advanceCinematicStep(){
+    const cine=this.state.cinematic;
+    if(!cine) return;
+    cine.stepIndex++;
+    if(cine.stepIndex>=cine.steps.length){this._completeCinematic();return;}
+    this._executeCinematicStep(cine.steps[cine.stepIndex]);
+  }
+
+  _completeCinematic(){
+    const cine=this.state.cinematic;
+    if(!cine) return;
+    const ca=cine.completionAction,cv=cine.completionValue;
+    this.state.cinematic=null;
+    switch(ca){
+      case 'navigate_scene':{
+        const s=this.project.scenes.find(s=>s.id===cv||s.name===cv);
+        if(s) this._loadScene(s.id);
+        break;
+      }
+      case 'show_dialog': this.state.dialogText=cv; break;
+      case 'set_variable':{
+        const i=cv.indexOf('=');
+        if(i!==-1) this.state.variables[cv.slice(0,i).trim()]=cv.slice(i+1).trim();
+        break;
+      }
+    }
+  }
+
+  _updateCinematic(dt){
+    const cine=this.state.cinematic;
+    if(!cine||cine.mode===null) return;
+    switch(cine.mode){
+      case 'walking_main':{
+        const char=this.state.character;
+        if(!char||!char.moving) this._advanceCinematicStep();
+        break;
+      }
+      case 'walking_npc':{
+        const npcId=cine.activeNpcId;
+        if(!npcId){this._advanceCinematicStep();break;}
+        const pos=cine.npcOverrides.get(npcId);
+        const target=cine.npcTargets.get(npcId);
+        if(!pos||!target){this._advanceCinematicStep();break;}
+        const dx=target.x-pos.x,dy=target.y-pos.y;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        const step=150*(dt/1000);
+        if(dist<=step){pos.x=target.x;pos.y=target.y;this._advanceCinematicStep();}
+        else{pos.x+=(dx/dist)*step;pos.y+=(dy/dist)*step;}
+        break;
+      }
+      case 'waiting':{
+        cine.waitMs-=dt;
+        if(cine.waitMs<=0) this._advanceCinematicStep();
+        break;
+      }
+      case 'action':{
+        cine.actionTimer-=dt;
+        if(cine.actionTimer<=0){cine.actionText=null;this._advanceCinematicStep();}
+        break;
+      }
+      case 'waiting_dialog': break;
+    }
+  }
+
+  _renderActionLabel(){
+    const cine=this.state.cinematic;
+    if(!cine||!cine.actionText) return;
+    const{canvas,ctx}=this;
+    const text=cine.actionText;
+    const fontSize=20;
+    ctx.font='bold '+fontSize+'px sans-serif';
+    const w=ctx.measureText(text).width+32,h=44;
+    const x=(canvas.width-w)/2,y=32;
+    ctx.fillStyle='rgba(0,0,0,0.75)';
+    ctx.beginPath();
+    ctx.roundRect(x,y,w,h,8);
+    ctx.fill();
+    ctx.strokeStyle='#f97316';
+    ctx.lineWidth=2;
+    ctx.stroke();
+    ctx.fillStyle='#fed7aa';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(text,canvas.width/2,y+h/2);
   }
 
   _getCharSheet(facing){
