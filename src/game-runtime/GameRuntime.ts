@@ -247,16 +247,30 @@ export class GameRuntime {
     }
 
     const objects = [...scene.objects].sort((a, b) => a.zIndex - b.zIndex)
+
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    // Character's depth in the scene = bottom edge of the character (feet Y).
+    // Objects with zIndex greater than this value render in front of the character.
+    const charDepth = char && mc ? char.y + mc.height : null
+
+    let charDrawn = false
     for (const obj of objects) {
       const visible = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
         : obj.visible
       if (!visible) continue
+
+      // Insert character draw before the first object whose z-index exceeds charDepth
+      if (!charDrawn && charDepth !== null && obj.zIndex > charDepth) {
+        this.renderCharacter()
+        charDrawn = true
+      }
+
       this.renderObject(obj)
     }
 
-    // Draw character on top of scene objects
-    this.renderCharacter()
+    if (!charDrawn) this.renderCharacter()
   }
 
   private renderObject(obj: SceneObject) {

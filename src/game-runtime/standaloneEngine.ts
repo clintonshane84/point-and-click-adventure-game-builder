@@ -228,13 +228,18 @@ export class GameEngine {
       const img = this.imageCache.get(scene.backgroundImageUrl);
       if (img) ctx.drawImage(img, 0, 0, scene.width, scene.height);
     }
-    [...scene.objects].sort((a,b) => a.zIndex-b.zIndex).forEach(obj => {
-      const vis = this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
-      if (!vis) return;
-      ctx.save(); ctx.globalAlpha = obj.opacity;
-      const img = obj.imageUrl ? this.imageCache.get(obj.imageUrl) : null;
-      if (img) {
-        ctx.drawImage(img, obj.x, obj.y, obj.width, obj.height);
+    const sortedObjs=[...scene.objects].sort((a,b)=>a.zIndex-b.zIndex);
+    const char=this.state.character,mc=this.project.mainCharacter;
+    const charDepth=(char&&mc)?char.y+mc.height:null;
+    let charDrawn=false;
+    for(const obj of sortedObjs){
+      const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
+      if(!vis) continue;
+      if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
+      ctx.save(); ctx.globalAlpha=obj.opacity;
+      const img=obj.imageUrl?this.imageCache.get(obj.imageUrl):null;
+      if(img){
+        ctx.drawImage(img,obj.x,obj.y,obj.width,obj.height);
       } else {
         const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b'};
         ctx.fillStyle=colors[obj.type]||'#4f46e5';
@@ -246,8 +251,8 @@ export class GameEngine {
         }
       }
       ctx.restore();
-    });
-    this._renderCharacter();
+    }
+    if(!charDrawn) this._renderCharacter();
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
   }

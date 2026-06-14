@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { Stage, Layer, Rect, Image as KonvaImage, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import {
@@ -631,14 +631,22 @@ export function SceneEditor() {
                     />
                   )}
 
-                  {/* Objects sorted by z-index */}
-                  {[...activeScene.objects]
-                    .sort((a, b) => a.zIndex - b.zIndex)
-                    .map((obj) => {
+                  {/* Objects + character, depth-sorted by z-index.
+                      Character depth = bottom of character (feet Y).
+                      Objects with zIndex > charDepth render in front of the character. */}
+                  {(() => {
+                    const cp = activeScene.characterPlacement
+                    const charDepth = cp?.visible
+                      ? cp.y + mainCharacter.height
+                      : null
+
+                    const sorted = [...activeScene.objects].sort((a, b) => a.zIndex - b.zIndex)
+
+                    function renderSceneObj(obj: typeof sorted[0]) {
                       if (!obj.visible) return null
                       const cfg = TYPE_CONFIG[obj.type]
                       const isSelected = obj.id === selectedObjId
-                      return (
+                      return [
                         <Rect
                           key={obj.id}
                           x={obj.x} y={obj.y}
@@ -652,47 +660,38 @@ export function SceneEditor() {
                           onClick={(e) => handleObjectClick(e, obj.id)}
                           onDragEnd={(e) => handleDragEnd(e, obj.id)}
                           onTransformEnd={(e) => handleTransformEnd(e, obj.id)}
-                        />
-                      )
-                    })}
+                        />,
+                        obj.type !== 'hotspot' && (
+                          <Text
+                            key={`lbl-${obj.id}`}
+                            x={obj.x + 4} y={obj.y + 4}
+                            text={obj.name}
+                            fontSize={12}
+                            fill="#e2e8f0"
+                            listening={false}
+                          />
+                        ),
+                        obj.type === 'hotspot' && obj.id === selectedObjId && (
+                          <Text
+                            key={`lbl-hs-${obj.id}`}
+                            x={obj.x + 4} y={obj.y + 4}
+                            text={`⬚ ${obj.name}`}
+                            fontSize={11}
+                            fill="#818cf8"
+                            listening={false}
+                          />
+                        ),
+                      ]
+                    }
 
-                  {/* Object name labels (hidden for hotspots to keep them invisible) */}
-                  {activeScene.objects
-                    .filter((o) => o.visible && o.type !== 'hotspot')
-                    .map((obj) => (
-                      <Text
-                        key={`lbl-${obj.id}`}
-                        x={obj.x + 4} y={obj.y + 4}
-                        text={obj.name}
-                        fontSize={12}
-                        fill="#e2e8f0"
-                        listening={false}
-                      />
-                    ))}
-
-                  {/* Hotspot labels (shown only when selected so they're discoverable) */}
-                  {activeScene.objects
-                    .filter((o) => o.type === 'hotspot' && o.id === selectedObjId)
-                    .map((obj) => (
-                      <Text
-                        key={`lbl-hs-${obj.id}`}
-                        x={obj.x + 4} y={obj.y + 4}
-                        text={`⬚ ${obj.name}`}
-                        fontSize={11}
-                        fill="#818cf8"
-                        listening={false}
-                      />
-                    ))}
-
-                  {/* Character start position marker */}
-                  {activeScene.characterPlacement?.visible && (() => {
-                    const cp = activeScene.characterPlacement!
-                    const cw = mainCharacter.width
-                    const ch = mainCharacter.height
-                    return (
-                      <>
-                        {charSpriteImage && charSheet ? (
+                    function renderCharacter() {
+                      if (!cp?.visible) return null
+                      const cw = mainCharacter.width
+                      const ch = mainCharacter.height
+                      return [
+                        charSpriteImage && charSheet ? (
                           <KonvaImage
+                            key="char-sprite"
                             image={charSpriteImage}
                             crop={{
                               x: charFrameCol * charSheet.frameWidth,
@@ -706,6 +705,7 @@ export function SceneEditor() {
                           />
                         ) : (
                           <Rect
+                            key="char-rect"
                             x={cp.x} y={cp.y}
                             width={cw} height={ch}
                             fill="rgba(99,102,241,0.18)"
@@ -714,16 +714,29 @@ export function SceneEditor() {
                             dash={[5, 3]}
                             listening={false}
                           />
-                        )}
+                        ),
                         <Text
+                          key="char-lbl"
                           x={cp.x} y={cp.y - 16}
                           text={`${FACING_ARROWS[cp.facing]} ${mainCharacter.name}`}
                           fontSize={11}
                           fill="#a5b4fc"
                           listening={false}
-                        />
-                      </>
-                    )
+                        />,
+                      ]
+                    }
+
+                    const elements: React.ReactNode[] = []
+                    let charDrawn = false
+                    for (const obj of sorted) {
+                      if (!charDrawn && charDepth !== null && obj.zIndex > charDepth) {
+                        elements.push(...(renderCharacter() ?? []))
+                        charDrawn = true
+                      }
+                      elements.push(...(renderSceneObj(obj) ?? []))
+                    }
+                    if (!charDrawn) elements.push(...(renderCharacter() ?? []))
+                    return elements
                   })()}
 
                   {/* Blocked zones */}
