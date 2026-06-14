@@ -102,7 +102,13 @@ export class GameRuntime {
     const scene = this.project.scenes.find((s) => s.id === sceneId)
     if (scene) {
       if (scene.backgroundImageUrl) this.loadImage(scene.backgroundImageUrl)
-      scene.objects.forEach((o) => { if (o.imageUrl) this.loadImage(o.imageUrl) })
+      scene.objects.forEach((o) => {
+        if (o.imageUrl) this.loadImage(o.imageUrl)
+        if (o.spriteSheetId) {
+          const sheet = this.project.spriteSheets?.find((s) => s.id === o.spriteSheetId)
+          if (sheet?.imageUrl) this.loadImage(sheet.imageUrl)
+        }
+      })
 
       // Pre-load character sprite sheets
       const mc = this.project.mainCharacter
@@ -277,6 +283,26 @@ export class GameRuntime {
     const { ctx } = this
     ctx.save()
     ctx.globalAlpha = obj.opacity
+
+    if (obj.spriteSheetId) {
+      const sheet = this.project.spriteSheets?.find((s) => s.id === obj.spriteSheetId)
+      if (sheet) {
+        const img = this.imageCache.get(sheet.imageUrl)
+        if (img) {
+          const fi = obj.frameIndex ?? 0
+          const col = fi % sheet.cols
+          const row = Math.floor(fi / sheet.cols)
+          ctx.drawImage(
+            img,
+            col * sheet.frameWidth, row * sheet.frameHeight,
+            sheet.frameWidth, sheet.frameHeight,
+            obj.x, obj.y, obj.width, obj.height,
+          )
+          ctx.restore()
+          return
+        }
+      }
+    }
 
     if (obj.imageUrl) {
       const img = this.imageCache.get(obj.imageUrl)

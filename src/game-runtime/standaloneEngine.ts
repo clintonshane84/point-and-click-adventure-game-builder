@@ -147,7 +147,10 @@ export class GameEngine {
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
       if (scene.backgroundImageUrl) this._loadImage(scene.backgroundImageUrl);
-      scene.objects.forEach(o => { if (o.imageUrl) this._loadImage(o.imageUrl); });
+      scene.objects.forEach(o => {
+        if (o.imageUrl) this._loadImage(o.imageUrl);
+        if (o.spriteSheetId) { const sh=this.project.spriteSheets?.find(s=>s.id===o.spriteSheetId); if(sh?.imageUrl) this._loadImage(sh.imageUrl); }
+      });
       const mc = this.project.mainCharacter;
       if (mc) {
         ['up','down','left','right'].forEach(dir => {
@@ -237,6 +240,13 @@ export class GameEngine {
       if(!vis) continue;
       if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
       ctx.save(); ctx.globalAlpha=obj.opacity;
+      const ssSheet=obj.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===obj.spriteSheetId):null;
+      const ssImg=ssSheet?this.imageCache.get(ssSheet.imageUrl):null;
+      if(ssImg&&ssSheet){
+        const fi=obj.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
+        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,obj.x,obj.y,obj.width,obj.height);
+        ctx.restore(); continue;
+      }
       const img=obj.imageUrl?this.imageCache.get(obj.imageUrl):null;
       if(img){
         ctx.drawImage(img,obj.x,obj.y,obj.width,obj.height);

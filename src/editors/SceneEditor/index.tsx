@@ -80,6 +80,17 @@ export function SceneEditor() {
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? scenes[0]
 
+  // Preloaded sprite sheet images for the canvas preview
+  const [spriteImages, setSpriteImages] = useState<Map<string, HTMLImageElement>>(new Map())
+  useEffect(() => {
+    project.spriteSheets.forEach((sheet) => {
+      if (!sheet.imageUrl || spriteImages.has(sheet.imageUrl)) return
+      const img = new window.Image()
+      img.onload = () => setSpriteImages((prev) => new Map(prev).set(sheet.imageUrl, img))
+      img.src = sheet.imageUrl
+    })
+  }, [project.spriteSheets])
+
   // Selection / tool
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
@@ -646,22 +657,66 @@ export function SceneEditor() {
                       if (!obj.visible) return null
                       const cfg = TYPE_CONFIG[obj.type]
                       const isSelected = obj.id === selectedObjId
+
+                      // Resolve sprite sheet frame if assigned
+                      const sheet = obj.spriteSheetId
+                        ? project.spriteSheets.find((s) => s.id === obj.spriteSheetId) ?? null
+                        : null
+                      const sheetImg = sheet ? spriteImages.get(sheet.imageUrl) ?? null : null
+                      const fi = obj.frameIndex ?? 0
+                      const col = fi % (sheet?.cols ?? 1)
+                      const row = Math.floor(fi / (sheet?.cols ?? 1))
+
+                      const handlers = {
+                        draggable: true,
+                        onClick: (e: Konva.KonvaEventObject<MouseEvent>) => handleObjectClick(e, obj.id),
+                        onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => handleDragEnd(e, obj.id),
+                        onTransformEnd: (e: Konva.KonvaEventObject<Event>) => handleTransformEnd(e, obj.id),
+                      }
+
                       return [
-                        <Rect
-                          key={obj.id}
-                          x={obj.x} y={obj.y}
-                          width={obj.width} height={obj.height}
-                          opacity={obj.opacity}
-                          fill={isSelected ? 'rgba(99,102,241,0.35)' : cfg.fill}
-                          stroke={isSelected ? '#818cf8' : cfg.stroke}
-                          strokeWidth={obj.type === 'hotspot' ? 1.5 : 2}
-                          dash={isSelected ? undefined : cfg.dash}
-                          draggable
-                          onClick={(e) => handleObjectClick(e, obj.id)}
-                          onDragEnd={(e) => handleDragEnd(e, obj.id)}
-                          onTransformEnd={(e) => handleTransformEnd(e, obj.id)}
-                        />,
-                        obj.type !== 'hotspot' && (
+                        sheetImg && sheet ? (
+                          <KonvaImage
+                            key={obj.id}
+                            image={sheetImg}
+                            crop={{
+                              x: col * sheet.frameWidth,
+                              y: row * sheet.frameHeight,
+                              width: sheet.frameWidth,
+                              height: sheet.frameHeight,
+                            }}
+                            x={obj.x} y={obj.y}
+                            width={obj.width} height={obj.height}
+                            opacity={obj.opacity}
+                            {...handlers}
+                          />
+                        ) : (
+                          <Rect
+                            key={obj.id}
+                            x={obj.x} y={obj.y}
+                            width={obj.width} height={obj.height}
+                            opacity={obj.opacity}
+                            fill={isSelected ? 'rgba(99,102,241,0.35)' : cfg.fill}
+                            stroke={isSelected ? '#818cf8' : cfg.stroke}
+                            strokeWidth={obj.type === 'hotspot' ? 1.5 : 2}
+                            dash={isSelected ? undefined : cfg.dash}
+                            {...handlers}
+                          />
+                        ),
+                        // Selection overlay for image objects (Transformer already shows handles)
+                        isSelected && sheetImg && (
+                          <Rect
+                            key={`sel-${obj.id}`}
+                            x={obj.x} y={obj.y}
+                            width={obj.width} height={obj.height}
+                            fill="rgba(99,102,241,0.20)"
+                            stroke="#818cf8"
+                            strokeWidth={2}
+                            listening={false}
+                          />
+                        ),
+                        // Label: only show for non-hotspot placeholder objects (no image assigned)
+                        !sheetImg && obj.type !== 'hotspot' && (
                           <Text
                             key={`lbl-${obj.id}`}
                             x={obj.x + 4} y={obj.y + 4}
@@ -950,6 +1005,83 @@ export function SceneEditor() {
                 className="rounded"
               />
             </div>
+
+            {/* Sprite picker — available for sprite and item types */}
+            {(selectedObj.type === 'sprite' || selectedObj.type === 'item') && (
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Sprite</label>
+                <select
+                  value={selectedObj.spriteSheetId ?? ''}
+                  onChange={(e) => {
+                    updateSceneObject(activeScene.id, selectedObj.id, {
+                      spriteSheetId: e.target.value || undefined,
+                      frameIndex: 0,
+                    })
+                  }}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">— none —</option>
+                  {project.spriteSheets.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+
+                {selectedObj.spriteSheetId && (() => {
+                  const sheet = project.spriteSheets.find((s) => s.id === selectedObj.spriteSheetId)
+                  if (!sheet) return null
+                  const totalFrames = sheet.rows * sheet.cols
+                  const currentFrame = selectedObj.frameIndex ?? 0
+                  const scale = 36 / Math.max(sheet.frameWidth, sheet.frameHeight)
+                  return (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-500">Frame {currentFrame} of {totalFrames - 1}</span>
+                        <button
+                          onClick={() => updateSceneObject(activeScene.id, selectedObj.id, { spriteSheetId: undefined, frameIndex: undefined })}
+                          className="text-xs text-gray-600 hover:text-red-400"
+                          title="Remove sprite"
+                        >
+                          ✕ remove
+                        </button>
+                      </div>
+                      <div
+                        className="grid gap-0.5 max-h-36 overflow-y-auto"
+                        style={{ gridTemplateColumns: `repeat(${Math.min(sheet.cols, 4)}, 1fr)` }}
+                      >
+                        {Array.from({ length: totalFrames }, (_, fi) => {
+                          const fc = fi % sheet.cols
+                          const fr = Math.floor(fi / sheet.cols)
+                          const isCurrent = fi === currentFrame
+                          return (
+                            <button
+                              key={fi}
+                              title={`Frame ${fi}`}
+                              onClick={() => updateSceneObject(activeScene.id, selectedObj.id, { frameIndex: fi })}
+                              className={`relative overflow-hidden rounded border ${
+                                isCurrent ? 'border-indigo-400' : 'border-gray-700 hover:border-gray-500'
+                              }`}
+                              style={{ width: 38, height: 38 }}
+                            >
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  backgroundImage: `url(${sheet.imageUrl})`,
+                                  backgroundPosition: `-${fc * sheet.frameWidth * scale}px -${fr * sheet.frameHeight * scale}px`,
+                                  backgroundSize: `${sheet.imageWidth * scale}px ${sheet.imageHeight * scale}px`,
+                                  backgroundRepeat: 'no-repeat',
+                                  imageRendering: 'pixelated',
+                                }}
+                              />
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
 
             {selectedObj.type === 'hotspot' && (
               <p className="text-xs text-indigo-400 bg-indigo-900/20 rounded p-2">

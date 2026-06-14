@@ -27,6 +27,8 @@ export interface SceneObject {
   height: number
   opacity: number
   imageUrl?: string
+  spriteSheetId?: string
+  frameIndex?: number
   zIndex: number
   visible: boolean
   properties: Record<string, string | number | boolean>
