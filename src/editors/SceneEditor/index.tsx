@@ -4,10 +4,12 @@ import type Konva from 'konva'
 import {
   Plus, Trash2, MousePointer, ChevronDown,
   ImageIcon, X, ZoomIn, ZoomOut,
-  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff,
+  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone } from '../../types'
+import { useAiStore } from '../../store/useAiStore'
+import { AiGenerateModal } from '../../components/AiGenerateModal'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, Asset } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -71,7 +73,9 @@ export function SceneEditor() {
     addSceneObject, updateSceneObject, deleteSceneObject,
     updateSceneCharacterPlacement,
     addBlockedZone, deleteBlockedZone,
+    addAsset,
   } = useGameStore()
+  const { settings: aiSettings } = useAiStore()
   const { scenes, activeSceneId, assets, mainCharacter } = project
 
   const activeScene = scenes.find((s) => s.id === activeSceneId) ?? scenes[0]
@@ -98,6 +102,9 @@ export function SceneEditor() {
   // Background image picker
   const [showBgPicker, setShowBgPicker] = useState(false)
   const bgPickerRef = useRef<HTMLDivElement>(null)
+
+  // AI generate modal
+  const [showAiBgModal, setShowAiBgModal] = useState(false)
 
   // Path editing mode
   const [pathMode, setPathMode] = useState(false)
@@ -307,6 +314,23 @@ export function SceneEditor() {
   function handleClearBgImage() {
     if (!activeScene) return
     useGameStore.getState().updateScene(activeScene.id, { backgroundImageUrl: undefined })
+  }
+
+  function handleAiBgGenerated(dataUrl: string, prompt: string) {
+    const name = `AI: ${prompt.slice(0, 40).trim()}`
+    const asset: Asset = {
+      id: `asset-${Date.now()}`,
+      name,
+      type: 'image',
+      url: dataUrl,
+      size: Math.round(dataUrl.length * 0.75),
+      createdAt: new Date().toISOString(),
+    }
+    addAsset(asset)
+    if (activeScene) {
+      useGameStore.getState().updateScene(activeScene.id, { backgroundImageUrl: dataUrl })
+    }
+    setShowAiBgModal(false)
   }
 
   // ── Delete selected object (toolbar) ──────────────────────────────────────
@@ -972,6 +996,15 @@ export function SceneEditor() {
                 </div>
               )}
 
+              <div className="space-y-1.5">
+              {aiSettings.enabled && (
+                <button
+                  onClick={() => setShowAiBgModal(true)}
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs bg-violet-700 hover:bg-violet-600 text-white border border-violet-600"
+                >
+                  <Sparkles size={11} /> AI Generate Background
+                </button>
+              )}
               <div className="relative" ref={bgPickerRef}>
                 <button
                   onClick={() => setShowBgPicker((v) => !v)}
@@ -1002,6 +1035,7 @@ export function SceneEditor() {
                     )}
                   </div>
                 )}
+              </div>
               </div>
             </div>
 
@@ -1069,6 +1103,15 @@ export function SceneEditor() {
           </div>
         )}
       </div>
+
+      {/* AI Generate Background Modal */}
+      {showAiBgModal && (
+        <AiGenerateModal
+          title="AI Generate Scene Background"
+          onGenerated={handleAiBgGenerated}
+          onClose={() => setShowAiBgModal(false)}
+        />
+      )}
     </div>
   )
 }
