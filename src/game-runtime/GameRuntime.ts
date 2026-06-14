@@ -574,6 +574,7 @@ export class GameRuntime {
   private getObjectAt(scene: Scene, x: number, y: number): SceneObject | null {
     return [...scene.objects]
       .filter((o) => {
+        if (o.type === 'hotspot') return false   // hotspots don't intercept clicks or cursor
         const vis = this.objectVisibility.has(o.id) ? this.objectVisibility.get(o.id)! : o.visible
         return vis
       })

@@ -396,7 +396,7 @@ export class GameEngine {
 
   _objAt(scene,x,y) {
     return [...scene.objects]
-      .filter(o=>(this.objectVisibility.has(o.id)?this.objectVisibility.get(o.id):o.visible))
+      .filter(o=>o.type!=='hotspot'&&(this.objectVisibility.has(o.id)?this.objectVisibility.get(o.id):o.visible))
       .sort((a,b)=>b.zIndex-a.zIndex)
       .find(o=>x>=o.x&&x<=o.x+o.width&&y>=o.y&&y<=o.y+o.height)||null;
   }
