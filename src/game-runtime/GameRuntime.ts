@@ -24,6 +24,7 @@ interface GameState {
   dialogText: string | null
   dialogCallback: (() => void) | null
   character: CharacterState | null
+  activeHotspots: Set<string>
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -60,6 +61,7 @@ export class GameRuntime {
       dialogText: null,
       dialogCallback: null,
       character: null,
+      activeHotspots: new Set(),
     }
   }
 
@@ -95,6 +97,7 @@ export class GameRuntime {
 
   private loadScene(sceneId: string) {
     this.state.currentSceneId = sceneId
+    this.state.activeHotspots = new Set()
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
@@ -138,11 +141,11 @@ export class GameRuntime {
       }
     }
 
-    // Fire 'enter' events
-    const enterEvents = this.project.events.filter(
-      (e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled
-    )
-    enterEvents.forEach((ev) => this.executeEvent(ev))
+    // Fire scene-level 'enter' events — skip hotspot-bound events (those fire via zone detection)
+    const hotspotIds = new Set(scene?.objects.filter((o) => o.type === 'hotspot').map((o) => o.id) ?? [])
+    this.project.events
+      .filter((e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled && !hotspotIds.has(e.objectId))
+      .forEach((ev) => this.executeEvent(ev))
   }
 
   // ── Render loop ───────────────────────────────────────────────────────────
@@ -153,8 +156,48 @@ export class GameRuntime {
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16
     this.lastFrameTime = now
     this.updateCharacter(dt)
+    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+    if (scene) this.checkHotspots(scene)
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
+  }
+
+  // ── Hotspot zone detection ────────────────────────────────────────────────
+
+  private checkHotspots(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    // Use character's foot position (bottom-center) for zone detection
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    for (const obj of scene.objects) {
+      if (obj.type !== 'hotspot') continue
+      const vis = this.objectVisibility.has(obj.id)
+        ? this.objectVisibility.get(obj.id)!
+        : obj.visible
+      if (!vis) continue
+
+      const inside =
+        fx >= obj.x && fx <= obj.x + obj.width &&
+        fy >= obj.y && fy <= obj.y + obj.height
+
+      const wasInside = this.state.activeHotspots.has(obj.id)
+
+      if (inside && !wasInside) {
+        this.state.activeHotspots.add(obj.id)
+        this.project.events
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'enter' && e.enabled)
+          .forEach((ev) => this.executeEvent(ev))
+      } else if (!inside && wasInside) {
+        this.state.activeHotspots.delete(obj.id)
+        this.project.events
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'exit' && e.enabled)
+          .forEach((ev) => this.executeEvent(ev))
+      }
+    }
   }
 
   // ── Character movement ────────────────────────────────────────────────────

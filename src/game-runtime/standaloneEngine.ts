@@ -113,6 +113,7 @@ export class GameEngine {
       dialogText: null,
       dialogCallback: null,
       character: null,
+      activeHotspots: new Set(),
     };
   }
 
@@ -143,6 +144,7 @@ export class GameEngine {
 
   _loadScene(sceneId) {
     this.state.currentSceneId = sceneId;
+    this.state.activeHotspots = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
@@ -168,9 +170,10 @@ export class GameEngine {
         };
       } else { this.state.character = null; }
     }
+    const hotspotIds=new Set(scene?.objects.filter(o=>o.type==='hotspot').map(o=>o.id)??[]);
     this.project.events
-      .filter(e => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled)
-      .forEach(ev => this._execEvent(ev));
+      .filter(e=>e.sceneId===sceneId&&e.trigger==='enter'&&e.enabled&&!hotspotIds.has(e.objectId))
+      .forEach(ev=>this._execEvent(ev));
   }
 
   _loop() {
@@ -179,8 +182,32 @@ export class GameEngine {
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16;
     this.lastFrameTime = now;
     this._updateCharacter(dt);
+    const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+    if(scene) this._checkHotspots(scene);
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
+  }
+
+  _checkHotspots(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    for(const obj of scene.objects){
+      if(obj.type!=='hotspot') continue;
+      const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
+      if(!vis) continue;
+      const inside=fx>=obj.x&&fx<=obj.x+obj.width&&fy>=obj.y&&fy<=obj.y+obj.height;
+      const wasInside=this.state.activeHotspots.has(obj.id);
+      if(inside&&!wasInside){
+        this.state.activeHotspots.add(obj.id);
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&e.trigger==='enter'&&e.enabled)
+          .forEach(ev=>this._execEvent(ev));
+      } else if(!inside&&wasInside){
+        this.state.activeHotspots.delete(obj.id);
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&e.trigger==='exit'&&e.enabled)
+          .forEach(ev=>this._execEvent(ev));
+      }
+    }
   }
 
   _updateCharacter(dt) {
