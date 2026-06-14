@@ -753,6 +753,74 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
     ),
   },
 
+  cinematic: {
+    title: 'Cinematic Editor',
+    content: (
+      <>
+        <P>
+          The Cinematic Editor lets you create scripted cutscenes — sequences of character
+          movements, dialogue, and actions that play out automatically when triggered by an event.
+        </P>
+
+        {H('Creating a cinematic')}
+        <Ul>
+          <Li>Click <Code>New Cinematic</Code> in the left panel to create one.</Li>
+          <Li>Give it a name and select which scene it takes place in.</Li>
+          <Li>Add steps in the center timeline, then configure each step in the right panel.</Li>
+        </Ul>
+
+        {H('Step types')}
+        <Table
+          rows={[
+            ['Walk To', 'Moves a character to a target X/Y position in the scene'],
+            ['Talk', 'Shows a dialogue line attributed to a specific character'],
+            ['Action', 'Displays a floating action label (e.g. "attacks", "gives gift") for 2s'],
+            ['Wait', 'Pauses the sequence for a configurable number of seconds'],
+            ['Show Dialog', 'Shows a plain dialog box without a named speaker'],
+            ['Set Variable', 'Sets a game variable (key=value) mid-cinematic'],
+            ['Play Sound', 'Plays an audio asset during the sequence'],
+          ]}
+        />
+
+        {H('Reordering steps')}
+        <P>
+          Use the <Code>↑</Code> and <Code>↓</Code> arrow buttons on each step card to change the
+          order of execution. Steps run from top to bottom.
+        </P>
+
+        {H('Completion action')}
+        <P>
+          When the last step finishes, the cinematic runs its <strong>Completion Action</strong>:
+        </P>
+        <Table
+          rows={[
+            ['Return to Game', 'Resumes normal gameplay after the cinematic'],
+            ['Navigate to Scene', 'Loads a different scene when the cinematic ends'],
+            ['Show Dialog', 'Displays a final dialog box'],
+            ['Set Variable', 'Sets a variable as the final action'],
+          ]}
+        />
+
+        {H('Triggering a cinematic')}
+        <P>
+          Link a cinematic to any event in the <strong>Event Editor</strong> using the{' '}
+          <Code>Play Cinematic</Code> action and selecting the cinematic by name.
+        </P>
+
+        <Tip>
+          Use cinematics for story moments — character introductions, item discoveries, scene
+          transitions — to give your game a polished, narrative feel.
+        </Tip>
+
+        <Warn>
+          NPC characters must be placed in the scene as <strong>Character</strong> objects with
+          the NPC assigned before a cinematic can move them. Assign NPCs in the Scene Editor's
+          object properties panel.
+        </Warn>
+      </>
+    ),
+  },
+
   export: {
     title: 'Export Game',
     content: (

@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Plus, Trash2, Save, Settings } from 'lucide-react'
+import { Plus, Trash2, Save, Settings, Sparkles, Eye, EyeOff } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
+import { useAiStore } from '../../store/useAiStore'
 import type { PlayerSetting, PlayerSettingType } from '../../types'
 
 const RESOLUTIONS = [
@@ -14,9 +15,11 @@ const RESOLUTIONS = [
 export function SettingsEditor() {
   const { project, updateSettings } = useGameStore()
   const { settings, scenes } = project
+  const { settings: aiSettings, updateSettings: updateAiSettings } = useAiStore()
 
   const [form, setForm] = useState({ ...settings })
   const [saved, setSaved] = useState(false)
+  const [showApiKey, setShowApiKey] = useState(false)
 
   const handleSave = () => {
     updateSettings(form)
@@ -272,6 +275,73 @@ export function SettingsEditor() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        {/* AI Image Generation */}
+        <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 mb-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Sparkles size={18} className="text-indigo-400" />
+            <h2 className="text-gray-200 font-semibold text-lg">AI Image Generation</h2>
+          </div>
+          <p className="text-gray-400 text-sm">
+            Generate sprites and backgrounds using AI. Settings are stored locally and never saved to your project file.
+          </p>
+
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <span className="text-sm text-gray-200">Enable AI Image Generation</span>
+              <p className="text-xs text-gray-500 mt-0.5">Adds "AI Generate" buttons to the Sprite and Scene editors</p>
+            </div>
+            <button
+              onClick={() => updateAiSettings({ enabled: !aiSettings.enabled })}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                aiSettings.enabled ? 'bg-indigo-600' : 'bg-gray-600'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  aiSettings.enabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {aiSettings.enabled && (
+            <div className="space-y-3 pt-1 border-t border-gray-700">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Provider</label>
+                <select
+                  value={aiSettings.provider}
+                  onChange={(e) => updateAiSettings({ provider: e.target.value as 'openai' })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="openai">OpenAI (DALL-E 3)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">API Key</label>
+                <div className="relative">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={aiSettings.apiKey}
+                    onChange={(e) => updateAiSettings({ apiKey: e.target.value })}
+                    placeholder="sk-..."
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 pr-9 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                  <button
+                    onClick={() => setShowApiKey((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                    type="button"
+                  >
+                    {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Your API key is stored only in your browser's local storage and is never included in exported project files.
+                </p>
+              </div>
             </div>
           )}
         </section>

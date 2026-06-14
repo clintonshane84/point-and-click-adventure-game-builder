@@ -19,10 +19,14 @@ import type {
   CursorStateName,
   CursorStateConfig,
   MainCharacter,
+  NpcCharacter,
+  Cinematic,
+  CinematicStep,
   CharacterAnimation,
   FacingDirection,
   CharacterPlacement,
   BlockedZone,
+  ScaleZone,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -102,6 +106,8 @@ const defaultProject: GameProject = {
   uiElements: [],
   spriteSheets: [],
   mainCharacter: defaultMainCharacter,
+  npcs: [],
+  cinematics: [],
   settings: defaultSettings,
   titleScreen: defaultTitleScreen,
   stages: [defaultStage],
@@ -179,10 +185,30 @@ interface GameStore {
   setCharacterAnimation: (direction: FacingDirection, anim: CharacterAnimation | null) => void
   updateSceneCharacterPlacement: (sceneId: string, placement: Partial<CharacterPlacement>) => void
 
+  // NPC actions
+  addNpc: (npc: NpcCharacter) => void
+  updateNpc: (id: string, updates: Partial<NpcCharacter>) => void
+  deleteNpc: (id: string) => void
+  setNpcAnimation: (npcId: string, direction: FacingDirection, anim: CharacterAnimation | null) => void
+
+  // Cinematic actions
+  addCinematic: (cinematic: Cinematic) => void
+  updateCinematic: (id: string, updates: Partial<Cinematic>) => void
+  deleteCinematic: (id: string) => void
+  addCinematicStep: (cinematicId: string, step: CinematicStep) => void
+  updateCinematicStep: (cinematicId: string, stepId: string, updates: Partial<CinematicStep>) => void
+  deleteCinematicStep: (cinematicId: string, stepId: string) => void
+  moveCinematicStep: (cinematicId: string, stepId: string, direction: 'up' | 'down') => void
+
   // Blocked zone (pathfinding) actions
   addBlockedZone: (sceneId: string, zone: BlockedZone) => void
   updateBlockedZone: (sceneId: string, zoneId: string, updates: Partial<BlockedZone>) => void
   deleteBlockedZone: (sceneId: string, zoneId: string) => void
+
+  // Scale zone (perspective) actions
+  addScaleZone: (sceneId: string, zone: ScaleZone) => void
+  updateScaleZone: (sceneId: string, zoneId: string, updates: Partial<ScaleZone>) => void
+  deleteScaleZone: (sceneId: string, zoneId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -196,6 +222,8 @@ export const useGameStore = create<GameStore>((set) => ({
       project: {
         ...project,
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
+        npcs: project.npcs ?? [],
+        cinematics: project.cinematics ?? [],
         updatedAt: new Date().toISOString(),
       },
     }),
@@ -703,6 +731,176 @@ export const useGameStore = create<GameStore>((set) => ({
             ? { ...s, blockedZones: (s.blockedZones ?? []).filter((z) => z.id !== zoneId) }
             : s
         ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addScaleZone: (sceneId, zone) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, scaleZones: [...(s.scaleZones ?? []), zone] }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateScaleZone: (sceneId, zoneId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? {
+                ...s,
+                scaleZones: (s.scaleZones ?? []).map((z) =>
+                  z.id === zoneId ? { ...z, ...updates } : z
+                ),
+              }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteScaleZone: (sceneId, zoneId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, scaleZones: (s.scaleZones ?? []).filter((z) => z.id !== zoneId) }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // NPC actions
+  addNpc: (npc) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: [...(state.project.npcs ?? []), npc],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateNpc: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: (state.project.npcs ?? []).map((n) => (n.id === id ? { ...n, ...updates } : n)),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteNpc: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: (state.project.npcs ?? []).filter((n) => n.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  setNpcAnimation: (npcId, direction, anim) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        npcs: (state.project.npcs ?? []).map((n) =>
+          n.id === npcId
+            ? { ...n, animations: { ...n.animations, [direction]: anim } }
+            : n
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Cinematic actions
+  addCinematic: (cinematic) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: [...(state.project.cinematics ?? []), cinematic],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateCinematic: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: (state.project.cinematics ?? []).map((c) =>
+          c.id === id ? { ...c, ...updates } : c
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteCinematic: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: (state.project.cinematics ?? []).filter((c) => c.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addCinematicStep: (cinematicId, step) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: (state.project.cinematics ?? []).map((c) =>
+          c.id === cinematicId ? { ...c, steps: [...c.steps, step] } : c
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateCinematicStep: (cinematicId, stepId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: (state.project.cinematics ?? []).map((c) =>
+          c.id === cinematicId
+            ? { ...c, steps: c.steps.map((s) => (s.id === stepId ? { ...s, ...updates } : s)) }
+            : c
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteCinematicStep: (cinematicId, stepId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: (state.project.cinematics ?? []).map((c) =>
+          c.id === cinematicId
+            ? { ...c, steps: c.steps.filter((s) => s.id !== stepId) }
+            : c
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  moveCinematicStep: (cinematicId, stepId, direction) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        cinematics: (state.project.cinematics ?? []).map((c) => {
+          if (c.id !== cinematicId) return c
+          const steps = [...c.steps]
+          const idx = steps.findIndex((s) => s.id === stepId)
+          if (idx < 0) return c
+          const target = direction === 'up' ? idx - 1 : idx + 1
+          if (target < 0 || target >= steps.length) return c
+          ;[steps[idx], steps[target]] = [steps[target], steps[idx]]
+          return { ...c, steps }
+        }),
         updatedAt: new Date().toISOString(),
       },
     })),

@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
-import { Upload, Plus, Trash2, Play, Pause, Film } from 'lucide-react'
+import { Upload, Plus, Trash2, Play, Pause, Film, Sparkles } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
+import { useAiStore } from '../../store/useAiStore'
+import { AiGenerateModal } from '../../components/AiGenerateModal'
 import type { SpriteSheet, Animation } from '../../types'
 
 export function SpriteManager() {
   const { project, addSpriteSheet, updateSpriteSheet, deleteSpriteSheet, addAnimation, updateAnimation, deleteAnimation } =
     useGameStore()
+  const { settings: aiSettings } = useAiStore()
   const { spriteSheets } = project
 
   const [selectedSheetId, setSelectedSheetId] = useState<string | null>(spriteSheets[0]?.id ?? null)
@@ -16,6 +19,7 @@ export function SpriteManager() {
 
   const [newAnimForm, setNewAnimForm] = useState({ name: '', startFrame: 0, endFrame: 0, fps: 8, loop: true })
   const [showAnimForm, setShowAnimForm] = useState(false)
+  const [showAiModal, setShowAiModal] = useState(false)
 
   const selectedSheet = spriteSheets.find((s) => s.id === selectedSheetId)
 
@@ -87,6 +91,39 @@ export function SpriteManager() {
     e.target.value = ''
   }
 
+  const handleAiGenerated = (dataUrl: string, prompt: string) => {
+    const img = new window.Image()
+    img.onload = () => {
+      const rows = 1
+      const cols = 1
+      const id = `sheet-${Date.now()}`
+      const name = prompt.slice(0, 32).replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'AI Generated'
+      const sheet: SpriteSheet = {
+        id,
+        name,
+        imageUrl: dataUrl,
+        imageWidth: img.width,
+        imageHeight: img.height,
+        rows,
+        cols,
+        frameWidth: img.width,
+        frameHeight: img.height,
+        frames: [{
+          id: 'frame-0',
+          row: 0, col: 0,
+          x: 0, y: 0,
+          width: img.width,
+          height: img.height,
+        }],
+        animations: [],
+      }
+      addSpriteSheet(sheet)
+      setSelectedSheetId(id)
+    }
+    img.src = dataUrl
+    setShowAiModal(false)
+  }
+
   const handleAddAnimation = () => {
     if (!selectedSheet) return
     const anim: Animation = {
@@ -123,13 +160,24 @@ export function SpriteManager() {
       <div className="w-56 bg-gray-800 border-r border-gray-700 flex flex-col">
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
           <span className="text-gray-300 text-sm font-semibold">Sprite Sheets</span>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white"
-            title="Import Sprite Sheet"
-          >
-            <Upload size={14} />
-          </button>
+          <div className="flex items-center gap-1">
+            {aiSettings.enabled && (
+              <button
+                onClick={() => setShowAiModal(true)}
+                className="p-1 rounded bg-violet-700 hover:bg-violet-600 text-white"
+                title="AI Generate Sprite Sheet"
+              >
+                <Sparkles size={14} />
+              </button>
+            )}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="p-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white"
+              title="Import Sprite Sheet"
+            >
+              <Upload size={14} />
+            </button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -400,6 +448,15 @@ export function SpriteManager() {
           </div>
         )}
       </div>
+
+      {/* AI Generate Modal */}
+      {showAiModal && (
+        <AiGenerateModal
+          title="AI Generate Sprite Sheet"
+          onGenerated={handleAiGenerated}
+          onClose={() => setShowAiModal(false)}
+        />
+      )}
 
       {/* Add Animation Modal */}
       {showAnimForm && (

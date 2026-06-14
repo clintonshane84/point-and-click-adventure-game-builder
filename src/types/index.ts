@@ -6,6 +6,7 @@ export type EditorType =
   | 'ui'
   | 'sprite'
   | 'character'
+  | 'cinematic'
   | 'settings'
   | 'titlescreen'
   | 'stage'
@@ -27,6 +28,9 @@ export interface SceneObject {
   height: number
   opacity: number
   imageUrl?: string
+  spriteSheetId?: string
+  frameIndex?: number
+  npcId?: string
   zIndex: number
   visible: boolean
   properties: Record<string, string | number | boolean>
@@ -45,12 +49,38 @@ export interface BlockedZone {
   height: number
 }
 
+export interface ScaleZone {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  scale: number          // character size multiplier inside zone (0.1–1.0)
+  speedMultiplier: number // walk speed multiplier inside zone (0.1–1.0)
+}
+
 export interface CharacterAnimation {
   spriteSheetId: string
   animationId: string
 }
 
 export interface MainCharacter {
+  id: string
+  name: string
+  description: string
+  width: number
+  height: number
+  defaultFacing: FacingDirection
+  animations: {
+    up: CharacterAnimation | null
+    down: CharacterAnimation | null
+    left: CharacterAnimation | null
+    right: CharacterAnimation | null
+  }
+}
+
+export interface NpcCharacter {
   id: string
   name: string
   description: string
@@ -82,6 +112,7 @@ export interface Scene {
   objects: SceneObject[]
   characterPlacement?: CharacterPlacement
   blockedZones?: BlockedZone[]
+  scaleZones?: ScaleZone[]
 }
 
 // Event types
@@ -96,6 +127,7 @@ export type ActionType =
   | 'hide_object'
   | 'play_animation'
   | 'stop_animation'
+  | 'play_cinematic'
 
 export interface EventAction {
   id: string
@@ -281,6 +313,45 @@ export interface CursorConfig {
   activeState: CursorStateName
 }
 
+// Cinematic types
+export type CinematicStepType =
+  | 'walk_to'
+  | 'talk'
+  | 'action'
+  | 'wait'
+  | 'show_dialog'
+  | 'set_variable'
+  | 'play_sound'
+
+export interface CinematicStep {
+  id: string
+  type: CinematicStepType
+  characterId?: string   // 'main-character' or NPC id
+  targetX?: number       // walk_to
+  targetY?: number       // walk_to
+  text?: string          // talk / show_dialog
+  actionLabel?: string   // action (e.g. "attacks", "gives gift")
+  duration?: number      // wait (seconds)
+  assetId?: string       // play_sound
+  variable?: string      // set_variable (name=value)
+}
+
+export type CinematicCompletionAction =
+  | 'return_to_game'
+  | 'navigate_scene'
+  | 'show_dialog'
+  | 'set_variable'
+
+export interface Cinematic {
+  id: string
+  name: string
+  description: string
+  sceneId: string
+  steps: CinematicStep[]
+  completionAction: CinematicCompletionAction
+  completionValue: string
+}
+
 // Top-level project
 export interface GameProject {
   id: string
@@ -294,6 +365,8 @@ export interface GameProject {
   uiElements: UIElement[]
   spriteSheets: SpriteSheet[]
   mainCharacter: MainCharacter
+  npcs: NpcCharacter[]
+  cinematics: Cinematic[]
   settings: GameSettings
   titleScreen: TitleScreenConfig
   stages: Stage[]
