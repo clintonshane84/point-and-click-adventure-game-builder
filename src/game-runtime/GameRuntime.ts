@@ -32,6 +32,7 @@ interface NpcRuntimeState {
   behaviorTimer: number  // ms countdown before next behavior decision
   behaviorPhase: 'idle' | 'moving'
   attackFired: boolean
+  scale: number          // current visual scale driven by scale zones (default 1)
 }
 
 type CinematicMode =
@@ -215,6 +216,7 @@ export class GameRuntime {
             behaviorTimer: 0,
             behaviorPhase: 'idle',
             attackFired: false,
+            scale: 1,
           })
         })
       this.state.npcStates = npcStateMap
@@ -353,7 +355,7 @@ export class GameRuntime {
               scene.blockedZones ?? [], scene.width, scene.height,
               char.x + mc.width / 2, char.y + mc.height / 2,
               step.targetX ?? 0, step.targetY ?? 0,
-              mc.width, mc.height,
+              mc.width * char.scale, mc.height * char.scale,
             )
             if (path.length > 0) {
               char.waypoints = path
@@ -621,6 +623,21 @@ export class GameRuntime {
 
       const speed = NPC_SPEEDS[instr]
 
+      // Compute NPC's current scale from scale zones (mirrors checkScaleZones for main char)
+      const npcFeetX = ns.x + obj.width / 2
+      const npcFeetY = ns.y + obj.height
+      let npcScale = 1
+      for (const zone of (scene.scaleZones ?? [])) {
+        if (npcFeetX >= zone.x && npcFeetX <= zone.x + zone.width &&
+            npcFeetY >= zone.y && npcFeetY <= zone.y + zone.height) {
+          npcScale = zone.scale
+          break
+        }
+      }
+      ns.scale = npcScale
+      const scaledNpcW = npc.width * npcScale
+      const scaledNpcH = npc.height * npcScale
+
       // ── Behavior decisions ────────────────────────────────────────────────────
       ns.behaviorTimer = Math.max(0, ns.behaviorTimer - dt)
 
@@ -631,14 +648,14 @@ export class GameRuntime {
           const dist = 80 + Math.random() * 120
           const tx = Math.max(0, Math.min(scene.width - obj.width, ns.x + Math.cos(angle) * dist))
           const ty = Math.max(0, Math.min(scene.height - obj.height, ns.y + Math.sin(angle) * dist))
-          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, npc.width, npc.height)
+          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, scaledNpcW, scaledNpcH)
           ns.waypointIndex = 0
           ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
           if (ns.behaviorPhase === 'idle') ns.behaviorTimer = 2000 + Math.random() * 4000
         } else if (instr === 'roam-human-in-field') {
           const tx = Math.random() * (scene.width - obj.width)
           const ty = Math.random() * (scene.height - obj.height)
-          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, npc.width, npc.height)
+          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, scaledNpcW, scaledNpcH)
           ns.waypointIndex = 0
           ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
           if (ns.behaviorPhase === 'idle') ns.behaviorTimer = 1000 + Math.random() * 2000
@@ -653,7 +670,7 @@ export class GameRuntime {
             const dy = ns.y - char.y
             const dist = Math.sqrt(dx * dx + dy * dy)
             if (dist > stopGap) {
-              ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, heroFeetX, heroFeetY, npc.width, npc.height)
+              ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, heroFeetX, heroFeetY, scaledNpcW, scaledNpcH)
               ns.waypointIndex = 0
               ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
             } else {
@@ -1047,8 +1064,8 @@ export class GameRuntime {
         char.x + mc.width / 2,
         char.y + mc.height / 2,
         pos.x, pos.y,
-        mc.width,
-        mc.height,
+        mc.width * char.scale,
+        mc.height * char.scale,
       )
       if (path.length > 0) {
         char.waypoints = path
