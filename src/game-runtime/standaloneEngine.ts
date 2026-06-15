@@ -115,6 +115,7 @@ export class GameEngine {
       character: null,
       activeHotspots: new Set(),
       cinematic: null,
+      npcStates: new Map(),
     };
   }
 
@@ -178,6 +179,13 @@ export class GameEngine {
           scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
         };
       } else { this.state.character = null; }
+      // Initialize NPC movement states
+      const npcStateMap=new Map();
+      (scene.objects||[]).filter(o=>o.type==='character'&&o.npcId&&o.movementInstruction&&o.movementInstruction!=='none').forEach(o=>{
+        const npc=(this.project.npcs||[]).find(n=>n.id===o.npcId);
+        npcStateMap.set(o.id,{x:o.x,y:o.y,facing:npc?.defaultFacing||'down',animFrame:0,animTimer:0,waypoints:[],waypointIndex:0,behaviorTimer:0,behaviorPhase:'idle',attackFired:false});
+      });
+      this.state.npcStates=npcStateMap;
     }
     const hotspotIds=new Set(scene?.objects.filter(o=>o.type==='hotspot').map(o=>o.id)??[]);
     this.project.events
@@ -192,7 +200,7 @@ export class GameEngine {
     this.lastFrameTime = now;
     this._updateCharacter(dt);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-    if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);}
+    if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._updateNpcs(dt,scene);}
     if(this.state.cinematic) this._updateCinematic(dt);
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
@@ -292,8 +300,10 @@ export class GameEngine {
       if(!vis) continue;
       if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
       let ro=obj;
+      const _ns=(obj.type==='character'&&obj.npcId&&!this.state.cinematic)?this.state.npcStates.get(obj.id):null;
       const _ov=obj.type==='character'&&obj.npcId&&this.state.cinematic?this.state.cinematic.npcOverrides.get(obj.npcId):null;
       if(_ov) ro=Object.assign({},obj,{x:_ov.x,y:_ov.y});
+      else if(_ns) ro=Object.assign({},obj,{x:_ns.x,y:_ns.y});
       ctx.save(); ctx.globalAlpha=ro.opacity;
       const ssSheet=ro.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===ro.spriteSheetId):null;
       const ssImg=ssSheet?this.imageCache.get(ssSheet.imageUrl):null;
@@ -305,14 +315,16 @@ export class GameEngine {
       if(ro.type==='character'&&ro.npcId){
         const npc=(this.project.npcs||[]).find(n=>n.id===ro.npcId);
         if(npc){
-          const fa=npc.animations[npc.defaultFacing];
+          const facing=(_ns&&_ns.behaviorPhase==='moving')?_ns.facing:npc.defaultFacing;
+          const fa=npc.animations[facing]||npc.animations[npc.defaultFacing];
           if(fa?.spriteSheetId){
             const nsh=this.project.spriteSheets?.find(s=>s.id===fa.spriteSheetId);
             if(nsh){
               const nim=this.imageCache.get(nsh.imageUrl);
               if(nim){
                 const adef=nsh.animations.find(a=>a.id===fa.animationId);
-                const fi=adef?.startFrame??0,col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
+                const fi=(_ns&&_ns.behaviorPhase==='moving')?_ns.animFrame:(adef?.startFrame??0);
+                const col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
                 ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,ro.x,ro.y,ro.width,ro.height);
                 ctx.restore(); continue;
               }
@@ -339,6 +351,79 @@ export class GameEngine {
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
     if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
+  }
+
+  _updateNpcs(dt,scene){
+    const NPC_SPEEDS={'none':0,'roam-slow-and-eat-grass':50,'roam-human-in-field':120,'follow-hero':150,'follow-and-attack-hero':180};
+    for(const obj of scene.objects){
+      if(obj.type!=='character'||!obj.npcId) continue;
+      const instr=obj.movementInstruction||'none';
+      if(instr==='none') continue;
+      const ns=this.state.npcStates.get(obj.id);
+      if(!ns) continue;
+      const npc=(this.project.npcs||[]).find(n=>n.id===obj.npcId);
+      if(!npc) continue;
+      const speed=NPC_SPEEDS[instr]||0;
+      ns.behaviorTimer=Math.max(0,ns.behaviorTimer-dt);
+      if(ns.behaviorPhase==='idle'&&ns.behaviorTimer<=0){
+        if(instr==='roam-slow-and-eat-grass'){
+          const angle=Math.random()*Math.PI*2,dist=80+Math.random()*120;
+          const tx=Math.max(0,Math.min(scene.width-obj.width,ns.x+Math.cos(angle)*dist));
+          const ty=Math.max(0,Math.min(scene.height-obj.height,ns.y+Math.sin(angle)*dist));
+          ns.waypoints=findPath(scene.blockedZones||[],scene.width,scene.height,ns.x+obj.width/2,ns.y+obj.height,tx+obj.width/2,ty+obj.height,npc.width,npc.height);
+          ns.waypointIndex=0;ns.behaviorPhase=ns.waypoints.length>0?'moving':'idle';
+          if(ns.behaviorPhase==='idle') ns.behaviorTimer=2000+Math.random()*4000;
+        } else if(instr==='roam-human-in-field'){
+          const tx=Math.random()*(scene.width-obj.width);
+          const ty=Math.random()*(scene.height-obj.height);
+          ns.waypoints=findPath(scene.blockedZones||[],scene.width,scene.height,ns.x+obj.width/2,ns.y+obj.height,tx+obj.width/2,ty+obj.height,npc.width,npc.height);
+          ns.waypointIndex=0;ns.behaviorPhase=ns.waypoints.length>0?'moving':'idle';
+          if(ns.behaviorPhase==='idle') ns.behaviorTimer=1000+Math.random()*2000;
+        } else if(instr==='follow-hero'||instr==='follow-and-attack-hero'){
+          const char=this.state.character,mc=this.project.mainCharacter;
+          if(char&&mc){
+            const stopGap=instr==='follow-and-attack-hero'?40:80;
+            const dx=ns.x-char.x,dy=ns.y-char.y,dist=Math.sqrt(dx*dx+dy*dy);
+            if(dist>stopGap){
+              ns.waypoints=findPath(scene.blockedZones||[],scene.width,scene.height,ns.x+obj.width/2,ns.y+obj.height,char.x+mc.width/2,char.y+mc.height,npc.width,npc.height);
+              ns.waypointIndex=0;ns.behaviorPhase=ns.waypoints.length>0?'moving':'idle';
+            } else {
+              if(instr==='follow-and-attack-hero'&&!ns.attackFired){
+                ns.attackFired=true;this.state.variables['npc_attacked_'+obj.id]=true;
+                if(!this.state.dialogText) this.state.dialogText=(npc.name||'NPC')+' attacks you!';
+              }
+              ns.behaviorTimer=2000;
+            }
+          } else {ns.behaviorTimer=2000;}
+        }
+      }
+      if(ns.behaviorPhase==='moving'){
+        const target=ns.waypoints[ns.waypointIndex];
+        if(!target){
+          ns.behaviorPhase='idle';
+          ns.behaviorTimer=instr==='roam-slow-and-eat-grass'?3000+Math.random()*5000:instr==='roam-human-in-field'?1000+Math.random()*2000:1500+Math.random()*1000;
+        } else {
+          const tx=target.x-obj.width/2,ty=target.y-obj.height;
+          const dx=tx-ns.x,dy=ty-ns.y,dist=Math.sqrt(dx*dx+dy*dy);
+          if(dist<3){ns.x=tx;ns.y=ty;ns.waypointIndex++;}
+          else {
+            if(Math.abs(dx)>=Math.abs(dy)){ns.facing=dx>0?'right':'left';}else{ns.facing=dy>0?'down':'up';}
+            const step=speed*(dt/1000),ratio=Math.min(step/dist,1);
+            ns.x+=dx*ratio;ns.y+=dy*ratio;
+            const ac=npc.animations[ns.facing];
+            if(ac?.spriteSheetId){
+              const sh=this.project.spriteSheets?.find(s=>s.id===ac.spriteSheetId);
+              const ad=sh?.animations.find(a=>a.id===ac.animationId);
+              if(ad&&ad.fps>0){const fms=1000/ad.fps;ns.animTimer+=dt;while(ns.animTimer>=fms){ns.animTimer-=fms;ns.animFrame++;if(ns.animFrame>ad.endFrame)ns.animFrame=ad.startFrame;}}
+            }
+          }
+        }
+      }
+      if(instr==='follow-and-attack-hero'&&!ns.attackFired){
+        const char=this.state.character,mc=this.project.mainCharacter;
+        if(char&&mc){const dx=ns.x-char.x,dy=ns.y-char.y;if(Math.sqrt(dx*dx+dy*dy)<=40){ns.attackFired=true;this.state.variables['npc_attacked_'+obj.id]=true;if(!this.state.dialogText) this.state.dialogText=(npc.name||'NPC')+' attacks you!';}}
+      }
+    }
   }
 
   _renderCharacter() {

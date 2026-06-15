@@ -1,7 +1,7 @@
 import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
-  CinematicCompletionAction,
+  CinematicCompletionAction, NpcMovementInstruction,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -19,6 +19,19 @@ interface CharacterState {
   targetScale: number
   speedMult: number   // current speed multiplier (lerps toward targetSpeedMult)
   targetSpeedMult: number
+}
+
+interface NpcRuntimeState {
+  x: number
+  y: number
+  facing: FacingDirection
+  animFrame: number
+  animTimer: number     // ms since last anim frame advance
+  waypoints: PathPoint[]
+  waypointIndex: number
+  behaviorTimer: number  // ms countdown before next behavior decision
+  behaviorPhase: 'idle' | 'moving'
+  attackFired: boolean
 }
 
 type CinematicMode =
@@ -52,6 +65,7 @@ interface GameState {
   character: CharacterState | null
   activeHotspots: Set<string>
   cinematic: CinematicPlayState | null
+  npcStates: Map<string, NpcRuntimeState>
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -90,6 +104,7 @@ export class GameRuntime {
       character: null,
       activeHotspots: new Set(),
       cinematic: null,
+      npcStates: new Map(),
     }
   }
 
@@ -182,6 +197,27 @@ export class GameRuntime {
       } else {
         this.state.character = null
       }
+
+      // Initialize NPC movement states for character objects with movement instructions
+      const npcStateMap = new Map<string, NpcRuntimeState>()
+      scene.objects
+        .filter((o) => o.type === 'character' && o.npcId && o.movementInstruction && o.movementInstruction !== 'none')
+        .forEach((o) => {
+          const npc = (this.project.npcs ?? []).find((n) => n.id === o.npcId)
+          npcStateMap.set(o.id, {
+            x: o.x,
+            y: o.y,
+            facing: npc?.defaultFacing ?? 'down',
+            animFrame: 0,
+            animTimer: 0,
+            waypoints: [],
+            waypointIndex: 0,
+            behaviorTimer: 0,
+            behaviorPhase: 'idle',
+            attackFired: false,
+          })
+        })
+      this.state.npcStates = npcStateMap
     }
 
     // Fire scene-level 'enter' events — skip hotspot-bound events (those fire via zone detection)
@@ -201,6 +237,7 @@ export class GameRuntime {
     this.updateCharacter(dt)
     const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
     if (scene) {
+      this.updateNpcs(dt, scene)
       this.checkHotspots(scene)
       this.checkScaleZones(scene)
     }
@@ -560,6 +597,158 @@ export class GameRuntime {
     }
   }
 
+  // ── NPC autonomous movement ───────────────────────────────────────────────
+
+  private updateNpcs(dt: number, scene: Scene) {
+    const NPC_SPEEDS: Record<NpcMovementInstruction, number> = {
+      'none': 0,
+      'roam-slow-and-eat-grass': 50,
+      'roam-human-in-field': 120,
+      'follow-hero': 150,
+      'follow-and-attack-hero': 180,
+    }
+
+    for (const obj of scene.objects) {
+      if (obj.type !== 'character' || !obj.npcId) continue
+      const instr = obj.movementInstruction ?? 'none'
+      if (instr === 'none') continue
+
+      const ns = this.state.npcStates.get(obj.id)
+      if (!ns) continue
+
+      const npc = (this.project.npcs ?? []).find((n) => n.id === obj.npcId)
+      if (!npc) continue
+
+      const speed = NPC_SPEEDS[instr]
+
+      // ── Behavior decisions ────────────────────────────────────────────────────
+      ns.behaviorTimer = Math.max(0, ns.behaviorTimer - dt)
+
+      if (ns.behaviorPhase === 'idle' && ns.behaviorTimer <= 0) {
+        // Decide next movement based on instruction
+        if (instr === 'roam-slow-and-eat-grass') {
+          const angle = Math.random() * Math.PI * 2
+          const dist = 80 + Math.random() * 120
+          const tx = Math.max(0, Math.min(scene.width - obj.width, ns.x + Math.cos(angle) * dist))
+          const ty = Math.max(0, Math.min(scene.height - obj.height, ns.y + Math.sin(angle) * dist))
+          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, npc.width, npc.height)
+          ns.waypointIndex = 0
+          ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
+          if (ns.behaviorPhase === 'idle') ns.behaviorTimer = 2000 + Math.random() * 4000
+        } else if (instr === 'roam-human-in-field') {
+          const tx = Math.random() * (scene.width - obj.width)
+          const ty = Math.random() * (scene.height - obj.height)
+          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, npc.width, npc.height)
+          ns.waypointIndex = 0
+          ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
+          if (ns.behaviorPhase === 'idle') ns.behaviorTimer = 1000 + Math.random() * 2000
+        } else if (instr === 'follow-hero' || instr === 'follow-and-attack-hero') {
+          const char = this.state.character
+          const mc = this.project.mainCharacter
+          if (char && mc) {
+            const stopGap = instr === 'follow-and-attack-hero' ? 40 : 80
+            const heroFeetX = char.x + mc.width / 2
+            const heroFeetY = char.y + mc.height
+            const dx = ns.x - char.x
+            const dy = ns.y - char.y
+            const dist = Math.sqrt(dx * dx + dy * dy)
+            if (dist > stopGap) {
+              ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, heroFeetX, heroFeetY, npc.width, npc.height)
+              ns.waypointIndex = 0
+              ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
+            } else {
+              // Close enough — check for attack
+              if (instr === 'follow-and-attack-hero' && !ns.attackFired) {
+                ns.attackFired = true
+                const objName = npc.name || 'NPC'
+                this.state.variables[`npc_attacked_${obj.id}`] = true
+                if (!this.state.dialogText) {
+                  this.state.dialogText = `${objName} attacks you!`
+                  this.state.dialogCallback = null
+                }
+              }
+              ns.behaviorTimer = 2000
+            }
+          } else {
+            ns.behaviorTimer = 2000
+          }
+        }
+      }
+
+      // ── Movement along waypoints ──────────────────────────────────────────────
+      if (ns.behaviorPhase === 'moving') {
+        const target = ns.waypoints[ns.waypointIndex]
+        if (!target) {
+          ns.behaviorPhase = 'idle'
+          if (instr === 'roam-slow-and-eat-grass') {
+            ns.behaviorTimer = 3000 + Math.random() * 5000
+          } else if (instr === 'roam-human-in-field') {
+            ns.behaviorTimer = 1000 + Math.random() * 2000
+          } else {
+            ns.behaviorTimer = 1500 + Math.random() * 1000
+          }
+        } else {
+          const tx = target.x - obj.width / 2
+          const ty = target.y - obj.height
+          const dx = tx - ns.x
+          const dy = ty - ns.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+
+          if (dist < 3) {
+            ns.x = tx
+            ns.y = ty
+            ns.waypointIndex++
+          } else {
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              ns.facing = dx > 0 ? 'right' : 'left'
+            } else {
+              ns.facing = dy > 0 ? 'down' : 'up'
+            }
+            const step = speed * (dt / 1000)
+            const ratio = Math.min(step / dist, 1)
+            ns.x += dx * ratio
+            ns.y += dy * ratio
+
+            // Advance animation
+            const animCfg = npc.animations[ns.facing]
+            if (animCfg?.spriteSheetId) {
+              const sheet = this.project.spriteSheets?.find((s) => s.id === animCfg.spriteSheetId)
+              const animDef = sheet?.animations.find((a) => a.id === animCfg.animationId)
+              if (animDef && animDef.fps > 0) {
+                const frameMs = 1000 / animDef.fps
+                ns.animTimer += dt
+                while (ns.animTimer >= frameMs) {
+                  ns.animTimer -= frameMs
+                  ns.animFrame++
+                  if (ns.animFrame > animDef.endFrame) ns.animFrame = animDef.startFrame
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Re-check follow distance for attack trigger even while moving
+      if ((instr === 'follow-hero' || instr === 'follow-and-attack-hero') && !ns.attackFired && instr === 'follow-and-attack-hero') {
+        const char = this.state.character
+        const mc = this.project.mainCharacter
+        if (char && mc) {
+          const dx = ns.x - char.x
+          const dy = ns.y - char.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist <= 40) {
+            ns.attackFired = true
+            this.state.variables[`npc_attacked_${obj.id}`] = true
+            if (!this.state.dialogText) {
+              this.state.dialogText = `${npc.name || 'NPC'} attacks you!`
+              this.state.dialogCallback = null
+            }
+          }
+        }
+      }
+    }
+  }
+
   // ── Rendering ─────────────────────────────────────────────────────────────
 
   private render() {
@@ -633,13 +822,18 @@ export class GameRuntime {
     ctx.save()
     ctx.globalAlpha = obj.opacity
 
-    // Apply cinematic NPC position override
+    // Apply NPC movement state position (if movement instruction set and not in cinematic)
+    const npcMoveState = (obj.type === 'character' && obj.npcId && !this.state.cinematic)
+      ? this.state.npcStates.get(obj.id)
+      : undefined
+    // Apply cinematic NPC position override (takes priority over movement state)
     const npcOverride = (obj.type === 'character' && obj.npcId && this.state.cinematic)
       ? this.state.cinematic.npcOverrides.get(obj.npcId)
       : undefined
     if (npcOverride) {
-      // Temporarily patch obj for rendering (shadow copy to avoid mutation)
       obj = { ...obj, x: npcOverride.x, y: npcOverride.y }
+    } else if (npcMoveState) {
+      obj = { ...obj, x: npcMoveState.x, y: npcMoveState.y }
     }
 
     if (obj.spriteSheetId) {
@@ -666,14 +860,17 @@ export class GameRuntime {
     if (obj.type === 'character' && obj.npcId) {
       const npc = (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === obj.npcId)
       if (npc) {
-        const facingAnim = npc.animations[npc.defaultFacing]
+        const facing = npcMoveState?.facing ?? npc.defaultFacing
+        const facingAnim = npc.animations[facing]
         if (facingAnim?.spriteSheetId) {
           const sheet = this.project.spriteSheets?.find((s) => s.id === facingAnim.spriteSheetId)
           if (sheet) {
             const img = this.imageCache.get(sheet.imageUrl)
             if (img) {
               const animDef = sheet.animations.find((a) => a.id === facingAnim.animationId)
-              const fi = animDef?.startFrame ?? 0
+              const fi = (npcMoveState && npcMoveState.behaviorPhase === 'moving')
+                ? npcMoveState.animFrame
+                : (animDef?.startFrame ?? 0)
               const col = fi % sheet.cols
               const row = Math.floor(fi / sheet.cols)
               ctx.drawImage(

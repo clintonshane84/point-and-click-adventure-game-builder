@@ -33,7 +33,7 @@ export function AssetsManager() {
   const [showAiModal, setShowAiModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleAiGenerated = (dataUrl: string, prompt: string) => {
+  const handleAiGenerated = (dataUrl: string, _prompt: string) => {
     const asset: Asset = {
       id: `asset-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       name: `ai-image-${Date.now()}.png`,
