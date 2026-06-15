@@ -18,6 +18,13 @@ export type EditorType =
 // Scene types
 export type SceneObjectType = 'sprite' | 'background' | 'hotspot' | 'character' | 'item'
 
+export type NpcMovementInstruction =
+  | 'none'
+  | 'roam-slow-and-eat-grass'
+  | 'roam-human-in-field'
+  | 'follow-hero'
+  | 'follow-and-attack-hero'
+
 export interface SceneObject {
   id: string
   name: string
@@ -31,6 +38,7 @@ export interface SceneObject {
   spriteSheetId?: string
   frameIndex?: number
   npcId?: string
+  movementInstruction?: NpcMovementInstruction
   zIndex: number
   visible: boolean
   properties: Record<string, string | number | boolean>

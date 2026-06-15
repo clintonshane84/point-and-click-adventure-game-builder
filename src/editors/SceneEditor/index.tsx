@@ -9,7 +9,7 @@ import {
 import { useGameStore } from '../../store/useGameStore'
 import { useAiStore } from '../../store/useAiStore'
 import { AiGenerateModal } from '../../components/AiGenerateModal'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter, NpcMovementInstruction } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -1299,7 +1299,14 @@ export function SceneEditor() {
                 <label className="text-xs text-gray-400 block mb-1">NPC Character</label>
                 <select
                   value={selectedObj.npcId ?? ''}
-                  onChange={(e) => updateSceneObject(activeScene.id, selectedObj.id, { npcId: e.target.value || undefined })}
+                  onChange={(e) => {
+                    const npcId = e.target.value || undefined
+                    const npc = npcId ? (project.npcs ?? []).find((n: NpcCharacter) => n.id === npcId) : null
+                    updateSceneObject(activeScene.id, selectedObj.id, {
+                      npcId,
+                      ...(npc ? { width: npc.width, height: npc.height } : {}),
+                    })
+                  }}
                   className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
                 >
                   <option value="">— none —</option>
@@ -1309,6 +1316,29 @@ export function SceneEditor() {
                 </select>
                 {(project.npcs ?? []).length === 0 && (
                   <p className="text-xs text-gray-600 mt-1 italic">Add NPCs in the Characters editor first.</p>
+                )}
+              </div>
+            )}
+
+            {/* Movement instruction — character objects with an NPC assigned */}
+            {selectedObj.type === 'character' && (
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Movement</label>
+                <select
+                  value={selectedObj.movementInstruction ?? 'none'}
+                  onChange={(e) => updateSceneObject(activeScene.id, selectedObj.id, {
+                    movementInstruction: e.target.value as NpcMovementInstruction,
+                  })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="none">None</option>
+                  <option value="roam-slow-and-eat-grass">Roam – Slow &amp; Eat Grass</option>
+                  <option value="roam-human-in-field">Roam – Human in Field</option>
+                  <option value="follow-hero">Follow Hero</option>
+                  <option value="follow-and-attack-hero">Follow &amp; Attack Hero</option>
+                </select>
+                {!selectedObj.npcId && (selectedObj.movementInstruction ?? 'none') !== 'none' && (
+                  <p className="text-xs text-amber-500 mt-1 italic">Assign an NPC Character above to enable movement.</p>
                 )}
               </div>
             )}
