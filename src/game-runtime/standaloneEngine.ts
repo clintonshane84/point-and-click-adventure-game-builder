@@ -304,12 +304,15 @@ export class GameEngine {
       const _ov=obj.type==='character'&&obj.npcId&&this.state.cinematic?this.state.cinematic.npcOverrides.get(obj.npcId):null;
       if(_ov) ro=Object.assign({},obj,{x:_ov.x,y:_ov.y});
       else if(_ns) ro=Object.assign({},obj,{x:_ns.x,y:_ns.y});
+      const _npcScale=(ro.type==='character'&&_ns)?(_ns.scale??1):1;
+      const _npcSW=ro.width*_npcScale,_npcSH=ro.height*_npcScale;
+      const _npcRX=Math.round(ro.x+(ro.width-_npcSW)/2),_npcRY=Math.round(ro.y+ro.height-_npcSH);
       ctx.save(); ctx.globalAlpha=ro.opacity;
       const ssSheet=ro.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===ro.spriteSheetId):null;
       const ssImg=ssSheet?this.imageCache.get(ssSheet.imageUrl):null;
       if(ssImg&&ssSheet){
         const fi=ro.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
-        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,ro.x,ro.y,ro.width,ro.height);
+        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,_npcRX,_npcRY,_npcSW,_npcSH);
         ctx.restore(); continue;
       }
       if(ro.type==='character'&&ro.npcId){
@@ -325,7 +328,7 @@ export class GameEngine {
                 const adef=nsh.animations.find(a=>a.id===fa.animationId);
                 const fi=(_ns&&_ns.behaviorPhase==='moving')?_ns.animFrame:(adef?.startFrame??0);
                 const col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
-                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,ro.x,ro.y,ro.width,ro.height);
+                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,_npcRX,_npcRY,_npcSW,_npcSH);
                 ctx.restore(); continue;
               }
             }
@@ -338,11 +341,11 @@ export class GameEngine {
       } else {
         const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b'};
         ctx.fillStyle=colors[ro.type]||'#4f46e5';
-        ctx.fillRect(ro.x,ro.y,ro.width,ro.height);
+        ctx.fillRect(_npcRX,_npcRY,_npcSW,_npcSH);
         if(ro.type!=='hotspot'){
           ctx.fillStyle='#fff'; ctx.font='14px sans-serif';
           ctx.textAlign='center'; ctx.textBaseline='middle';
-          ctx.fillText(ro.name,ro.x+ro.width/2,ro.y+ro.height/2);
+          ctx.fillText(ro.name,_npcRX+_npcSW/2,_npcRY+_npcSH/2);
         }
       }
       ctx.restore();

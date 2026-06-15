@@ -853,6 +853,15 @@ export class GameRuntime {
       obj = { ...obj, x: npcMoveState.x, y: npcMoveState.y }
     }
 
+    // Pre-compute scale-zone-adjusted render bounds for NPC character objects.
+    // Scale is anchored at the feet (bottom-centre), matching how the main
+    // character is rendered — the sprite shrinks upward from the ground.
+    const npcScale = (obj.type === 'character' && npcMoveState) ? (npcMoveState.scale ?? 1) : 1
+    const npcScaledW = obj.width * npcScale
+    const npcScaledH = obj.height * npcScale
+    const npcRenderX = Math.round(obj.x + (obj.width - npcScaledW) / 2)
+    const npcRenderY = Math.round(obj.y + obj.height - npcScaledH)
+
     if (obj.spriteSheetId) {
       const sheet = this.project.spriteSheets?.find((s) => s.id === obj.spriteSheetId)
       if (sheet) {
@@ -865,7 +874,7 @@ export class GameRuntime {
             img,
             col * sheet.frameWidth, row * sheet.frameHeight,
             sheet.frameWidth, sheet.frameHeight,
-            obj.x, obj.y, obj.width, obj.height,
+            npcRenderX, npcRenderY, npcScaledW, npcScaledH,
           )
           ctx.restore()
           return
@@ -894,7 +903,7 @@ export class GameRuntime {
                 img,
                 col * sheet.frameWidth, row * sheet.frameHeight,
                 sheet.frameWidth, sheet.frameHeight,
-                obj.x, obj.y, obj.width, obj.height,
+                npcRenderX, npcRenderY, npcScaledW, npcScaledH,
               )
               ctx.restore()
               return
@@ -921,15 +930,15 @@ export class GameRuntime {
       background: '#1e293b',
     }
     ctx.fillStyle = placeholderColors[obj.type] ?? '#4f46e5'
-    ctx.fillRect(obj.x, obj.y, obj.width, obj.height)
+    ctx.fillRect(npcRenderX, npcRenderY, npcScaledW, npcScaledH)
 
     if (obj.type !== 'hotspot') {
       ctx.fillStyle = '#fff'
-      const fontSize = Math.max(10, Math.min(14, obj.height * 0.25))
+      const fontSize = Math.max(10, Math.min(14, npcScaledH * 0.25))
       ctx.font = `${fontSize}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(obj.name, obj.x + obj.width / 2, obj.y + obj.height / 2)
+      ctx.fillText(obj.name, npcRenderX + npcScaledW / 2, npcRenderY + npcScaledH / 2)
     }
     ctx.restore()
   }
