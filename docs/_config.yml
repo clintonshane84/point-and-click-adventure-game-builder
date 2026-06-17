@@ -1,0 +1,19 @@
+title: CAPAB — Click and Point Adventure Builder
+description: A browser-based tool for building point-and-click adventure games — no coding required.
+baseurl: "/point-and-click-adventure-game-builder"
+url: "https://clintonshane84.github.io"
+
+theme: just-the-docs
+
+color_scheme: dark
+
+aux_links:
+  "GitHub":
+    - "https://github.com/clintonshane84/point-and-click-adventure-game-builder"
+
+footer_content: "CAPAB — Click and Point Adventure Builder"
+
+# Just the Docs settings
+search_enabled: true
+heading_anchors: true
+permalink: pretty
