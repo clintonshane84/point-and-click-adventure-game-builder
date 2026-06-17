@@ -67,6 +67,7 @@ interface GameState {
   activeHotspots: Set<string>
   cinematic: CinematicPlayState | null
   npcStates: Map<string, NpcRuntimeState>
+  showTitleScreen: boolean
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -82,6 +83,7 @@ export class GameRuntime {
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
   private boundMouseMove: (e: MouseEvent) => void
+  private titleScreenButtonRects: { id: string; action: string; x: number; y: number; w: number; h: number }[] = []
 
   constructor(canvas: HTMLCanvasElement, project: GameProject) {
     this.canvas = canvas
@@ -95,6 +97,8 @@ export class GameRuntime {
   }
 
   private freshState(): GameState {
+    const ts = this.project.titleScreen
+    const hasTitleScreen = !!(ts?.titleText || (ts?.buttons && ts.buttons.length > 0))
     return {
       currentSceneId: this.project.settings.startingSceneId || this.project.scenes[0]?.id || '',
       variables: {},
@@ -106,6 +110,7 @@ export class GameRuntime {
       activeHotspots: new Set(),
       cinematic: null,
       npcStates: new Map(),
+      showTitleScreen: hasTitleScreen,
     }
   }
 
@@ -115,7 +120,12 @@ export class GameRuntime {
     this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
-    this.loadScene(this.state.currentSceneId)
+    if (this.state.showTitleScreen) {
+      const ts = this.project.titleScreen
+      if (ts?.backgroundImageUrl) this.loadImage(ts.backgroundImageUrl)
+    } else {
+      this.loadScene(this.state.currentSceneId)
+    }
     this.renderLoop()
   }
 
@@ -236,14 +246,16 @@ export class GameRuntime {
     const now = performance.now()
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16
     this.lastFrameTime = now
-    this.updateCharacter(dt)
-    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
-    if (scene) {
-      this.updateNpcs(dt, scene)
-      this.checkHotspots(scene)
-      this.checkScaleZones(scene)
+    if (!this.state.showTitleScreen) {
+      this.updateCharacter(dt)
+      const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+      if (scene) {
+        this.updateNpcs(dt, scene)
+        this.checkHotspots(scene)
+        this.checkScaleZones(scene)
+      }
+      if (this.state.cinematic) this.updateCinematic(dt)
     }
-    if (this.state.cinematic) this.updateCinematic(dt)
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
   }
@@ -770,9 +782,14 @@ export class GameRuntime {
 
   private render() {
     const { canvas, ctx } = this
-    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
-
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    if (this.state.showTitleScreen) {
+      this.renderTitleScreen()
+      return
+    }
+
+    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
 
     if (!scene) {
       ctx.fillStyle = '#1a1a2e'
@@ -795,6 +812,69 @@ export class GameRuntime {
 
     if (this.state.dialogText) this.renderDialog()
     if (this.state.cinematic?.actionText) this.renderActionLabel()
+  }
+
+  private renderTitleScreen() {
+    const { canvas, ctx } = this
+    const ts = this.project.titleScreen
+
+    ctx.fillStyle = ts?.backgroundColor || '#000000'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    if (ts?.backgroundImageUrl) {
+      const img = this.imageCache.get(ts.backgroundImageUrl)
+      if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    }
+
+    if (ts?.titleText) {
+      const fontSize = ts.titleFontSize || 48
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.fillStyle = ts.titleColor || '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(ts.titleText, canvas.width / 2, canvas.height * 0.22)
+    }
+
+    if (ts?.subtitleText) {
+      const fontSize = ts.subtitleFontSize || 24
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.fillStyle = ts.subtitleColor || '#cccccc'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(ts.subtitleText, canvas.width / 2, canvas.height * 0.36)
+    }
+
+    this.titleScreenButtonRects = []
+    const buttons = [...(ts?.buttons ?? [])].sort((a, b) => a.order - b.order)
+    const btnW = Math.min(240, canvas.width * 0.5)
+    const btnH = 48
+    const btnGap = 16
+    const startY = canvas.height * 0.52
+
+    buttons.forEach((btn, i) => {
+      const x = (canvas.width - btnW) / 2
+      const y = startY + i * (btnH + btnGap)
+      this.titleScreenButtonRects.push({ id: btn.id, action: btn.action, x, y, w: btnW, h: btnH })
+
+      ctx.fillStyle = 'rgba(99,102,241,0.9)'
+      ctx.beginPath()
+      ctx.roundRect(x, y, btnW, btnH, 8)
+      ctx.fill()
+      ctx.strokeStyle = '#818cf8'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(btn.label, x + btnW / 2, y + btnH / 2)
+    })
+  }
+
+  private startGame(_buttonAction: string) {
+    this.state.showTitleScreen = false
+    this.loadScene(this.state.currentSceneId)
   }
 
   private renderScene(scene: Scene) {
@@ -1043,6 +1123,19 @@ export class GameRuntime {
   }
 
   private handleClick(e: MouseEvent) {
+    if (this.state.showTitleScreen) {
+      const rect = this.canvas.getBoundingClientRect()
+      const cx = (e.clientX - rect.left) * (this.canvas.width / rect.width)
+      const cy = (e.clientY - rect.top) * (this.canvas.height / rect.height)
+      for (const br of this.titleScreenButtonRects) {
+        if (cx >= br.x && cx <= br.x + br.w && cy >= br.y && cy <= br.y + br.h) {
+          this.startGame(br.action)
+          return
+        }
+      }
+      return
+    }
+
     if (this.state.dialogText) {
       this.state.dialogText = null
       const cb = this.state.dialogCallback
@@ -1086,6 +1179,17 @@ export class GameRuntime {
   }
 
   private handleMouseMove(e: MouseEvent) {
+    if (this.state.showTitleScreen) {
+      const rect = this.canvas.getBoundingClientRect()
+      const cx = (e.clientX - rect.left) * (this.canvas.width / rect.width)
+      const cy = (e.clientY - rect.top) * (this.canvas.height / rect.height)
+      const onBtn = this.titleScreenButtonRects.some(
+        (br) => cx >= br.x && cx <= br.x + br.w && cy >= br.y && cy <= br.y + br.h
+      )
+      this.canvas.style.cursor = onBtn ? 'pointer' : 'default'
+      return
+    }
+
     if (this.state.dialogText) return
     const pos = this.getScenePos(e)
     const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)

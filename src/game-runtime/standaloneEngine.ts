@@ -99,12 +99,15 @@ export class GameEngine {
     this.objectVisibility = new Map();
     this.frameId = null;
     this.lastFrameTime = 0;
+    this.titleScreenButtonRects = [];
     this.state = this._freshState();
     this._boundClick = this._handleClick.bind(this);
     this._boundMove = this._handleMouseMove.bind(this);
   }
 
   _freshState() {
+    const ts=this.project.titleScreen;
+    const hasTitleScreen=!!(ts?.titleText||(ts?.buttons&&ts.buttons.length>0));
     return {
       currentSceneId: this.project.settings?.startingSceneId || this.project.scenes[0]?.id || '',
       variables: {},
@@ -116,6 +119,7 @@ export class GameEngine {
       activeHotspots: new Set(),
       cinematic: null,
       npcStates: new Map(),
+      showTitleScreen: hasTitleScreen,
     };
   }
 
@@ -125,7 +129,12 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
-    this._loadScene(this.state.currentSceneId);
+    if(this.state.showTitleScreen){
+      const ts=this.project.titleScreen;
+      if(ts?.backgroundImageUrl) this._loadImage(ts.backgroundImageUrl);
+    } else {
+      this._loadScene(this.state.currentSceneId);
+    }
     this._loop();
   }
 
@@ -198,10 +207,12 @@ export class GameEngine {
     const now = performance.now();
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16;
     this.lastFrameTime = now;
-    this._updateCharacter(dt);
-    const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-    if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._updateNpcs(dt,scene);}
-    if(this.state.cinematic) this._updateCinematic(dt);
+    if(!this.state.showTitleScreen){
+      this._updateCharacter(dt);
+      const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._updateNpcs(dt,scene);}
+      if(this.state.cinematic) this._updateCinematic(dt);
+    }
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
   }
@@ -274,8 +285,9 @@ export class GameEngine {
 
   _render() {
     const { canvas, ctx } = this;
-    const scene = this.project.scenes.find(s => s.id === this.state.currentSceneId);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if(this.state.showTitleScreen){ this._renderTitleScreen(); return; }
+    const scene = this.project.scenes.find(s => s.id === this.state.currentSceneId);
     if (!scene) {
       ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,canvas.width,canvas.height);
       ctx.fillStyle = '#e2e8f0'; ctx.font = '20px sans-serif';
@@ -354,6 +366,43 @@ export class GameEngine {
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
     if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
+  }
+
+  _renderTitleScreen(){
+    const{canvas,ctx}=this,ts=this.project.titleScreen;
+    ctx.fillStyle=ts?.backgroundColor||'#000000';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(ts?.backgroundImageUrl){const img=this.imageCache.get(ts.backgroundImageUrl);if(img)ctx.drawImage(img,0,0,canvas.width,canvas.height);}
+    if(ts?.titleText){
+      ctx.font='bold '+(ts.titleFontSize||48)+'px sans-serif';
+      ctx.fillStyle=ts.titleColor||'#ffffff';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(ts.titleText,canvas.width/2,canvas.height*0.22);
+    }
+    if(ts?.subtitleText){
+      ctx.font=(ts.subtitleFontSize||24)+'px sans-serif';
+      ctx.fillStyle=ts.subtitleColor||'#cccccc';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(ts.subtitleText,canvas.width/2,canvas.height*0.36);
+    }
+    this.titleScreenButtonRects=[];
+    const btns=[...(ts?.buttons||[])].sort((a,b)=>a.order-b.order);
+    const bw=Math.min(240,canvas.width*0.5),bh=48,bg=16,sy=canvas.height*0.52;
+    btns.forEach((btn,i)=>{
+      const x=(canvas.width-bw)/2,y=sy+i*(bh+bg);
+      this.titleScreenButtonRects.push({id:btn.id,action:btn.action,x,y,w:bw,h:bh});
+      ctx.fillStyle='rgba(99,102,241,0.9)';
+      ctx.beginPath();ctx.roundRect(x,y,bw,bh,8);ctx.fill();
+      ctx.strokeStyle='#818cf8';ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle='#ffffff';ctx.font='bold 16px sans-serif';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(btn.label,x+bw/2,y+bh/2);
+    });
+  }
+
+  _startGame(_action){
+    this.state.showTitleScreen=false;
+    this._loadScene(this.state.currentSceneId);
   }
 
   _updateNpcs(dt,scene){
@@ -488,6 +537,15 @@ export class GameEngine {
   }
 
   _handleClick(e) {
+    if(this.state.showTitleScreen){
+      const r=this.canvas.getBoundingClientRect();
+      const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
+      const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+      for(const br of this.titleScreenButtonRects){
+        if(cx>=br.x&&cx<=br.x+br.w&&cy>=br.y&&cy<=br.y+br.h){this._startGame(br.action);return;}
+      }
+      return;
+    }
     if (this.state.dialogText) {
       this.state.dialogText=null;
       const cb=this.state.dialogCallback; this.state.dialogCallback=null; if(cb)cb();
@@ -512,6 +570,14 @@ export class GameEngine {
   }
 
   _handleMouseMove(e) {
+    if(this.state.showTitleScreen){
+      const r=this.canvas.getBoundingClientRect();
+      const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
+      const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+      const onBtn=this.titleScreenButtonRects.some(br=>cx>=br.x&&cx<=br.x+br.w&&cy>=br.y&&cy<=br.y+br.h);
+      this.canvas.style.cursor=onBtn?'pointer':'default';
+      return;
+    }
     if (this.state.dialogText) return;
     const pos=this._scenePos(e);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
