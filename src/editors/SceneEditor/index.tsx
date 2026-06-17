@@ -4,7 +4,7 @@ import type Konva from 'konva'
 import {
   Plus, Trash2, MousePointer, ChevronDown,
   ImageIcon, X, ZoomIn, ZoomOut,
-  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles, Shrink,
+  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles, Shrink, Layers,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
 import { useAiStore } from '../../store/useAiStore'
@@ -59,9 +59,13 @@ const TYPE_CONFIG: Record<SceneObjectType, TypeStyle> = {
     fill: 'rgba(99,102,241,0.08)', stroke: '#818cf8',
     dash: [6, 4], label: 'Hotspot', icon: <Crosshair size={11} />,
   },
+  terrain: {
+    fill: '#14532d', stroke: '#22c55e',
+    label: 'Terrain', icon: <Layers size={11} />,
+  },
 }
 
-const OBJECT_TYPES: SceneObjectType[] = ['sprite', 'character', 'item', 'hotspot', 'background']
+const OBJECT_TYPES: SceneObjectType[] = ['sprite', 'character', 'item', 'terrain', 'hotspot', 'background']
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -1216,8 +1220,8 @@ export function SceneEditor() {
               />
             </div>
 
-            {/* Sprite picker — available for sprite and item types */}
-            {(selectedObj.type === 'sprite' || selectedObj.type === 'item') && (
+            {/* Sprite picker — available for sprite, item, and terrain types */}
+            {(selectedObj.type === 'sprite' || selectedObj.type === 'item' || selectedObj.type === 'terrain') && (
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Sprite</label>
                 <select

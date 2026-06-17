@@ -16,7 +16,7 @@ export type EditorType =
   | 'export'
 
 // Scene types
-export type SceneObjectType = 'sprite' | 'background' | 'hotspot' | 'character' | 'item'
+export type SceneObjectType = 'sprite' | 'background' | 'hotspot' | 'character' | 'item' | 'terrain'
 
 export type NpcMovementInstruction =
   | 'none'

@@ -35,9 +35,10 @@ Every thing you place on a scene canvas is a **Scene Object**. Each object has a
 |---|---|
 | **Background** | Full-scene backdrop; sits at the back of the z-order |
 | **Sprite** | A static or animated image placed in the scene |
-| **Hotspot** | An invisible (or semi-transparent) clickable region |
+| **Terrain** | Environmental scenery (rocks, trees, walls, buildings); use z-index to layer in front of or behind the character for masking |
 | **Character** | An NPC linked to a character definition |
 | **Item** | A collectible or interactive prop |
+| **Hotspot** | An invisible (or semi-transparent) clickable region |
 
 ### Adding Objects
 
@@ -60,6 +61,13 @@ Select any object to edit its properties:
 For **Character** objects, additional options appear:
 - **NPC** — choose which NPC definition this object represents
 - **Movement Instruction** — assign autonomous behaviour (see [Characters](characters))
+
+### Terrain vs Item
+
+- **Terrain** — non-interactive environmental scenery (rocks, trees, buildings, walls). Use the z-index to place it in front of the character to create a masking effect (e.g., a tree the character walks behind).
+- **Item** — a collectible or interactive prop that a player can pick up or trigger events on.
+
+Keeping them separate makes it easy to find interactive objects in the Event Editor without wading through purely decorative terrain.
 
 ---
 

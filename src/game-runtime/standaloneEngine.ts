@@ -339,7 +339,7 @@ export class GameEngine {
       if(img){
         ctx.drawImage(img,ro.x,ro.y,ro.width,ro.height);
       } else {
-        const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b'};
+        const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b',terrain:'#14532d'};
         ctx.fillStyle=colors[ro.type]||'#4f46e5';
         ctx.fillRect(_npcRX,_npcRY,_npcSW,_npcSH);
         if(ro.type!=='hotspot'){

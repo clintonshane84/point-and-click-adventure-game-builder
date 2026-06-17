@@ -928,6 +928,7 @@ export class GameRuntime {
       item: '#d97706',
       hotspot: 'rgba(99,102,241,0.15)',
       background: '#1e293b',
+      terrain: '#14532d',
     }
     ctx.fillStyle = placeholderColors[obj.type] ?? '#4f46e5'
     ctx.fillRect(npcRenderX, npcRenderY, npcScaledW, npcScaledH)
