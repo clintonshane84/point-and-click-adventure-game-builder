@@ -124,7 +124,7 @@ export class GameRuntime {
       const ts = this.project.titleScreen
       if (ts?.backgroundImageUrl) this.loadImage(ts.backgroundImageUrl)
     } else {
-      this.loadScene(this.state.currentSceneId)
+      this.loadScene(this.state.currentSceneId, undefined, true)
     }
     this.renderLoop()
   }
@@ -149,7 +149,7 @@ export class GameRuntime {
 
   // ── Scene loading ─────────────────────────────────────────────────────────
 
-  private loadScene(sceneId: string, entryOverride?: { x: number; y: number; facing?: FacingDirection }) {
+  private loadScene(sceneId: string, entryOverride?: { x: number; y: number; facing?: FacingDirection }, stageStart = false) {
     this.state.currentSceneId = sceneId
     this.state.activeHotspots = new Set()
     if (!this.state.visitedScenes.includes(sceneId)) {
@@ -187,7 +187,8 @@ export class GameRuntime {
         }
       }
 
-      // Resolve character spawn: entryOverride (from exit zone) → characterPlacement → null
+      // Resolve character spawn:
+      //   entryOverride (navigate_scene arrival) → characterPlacement (stage start only) → null
       const mc2 = this.project.mainCharacter
       if (entryOverride && mc2) {
         const facing = entryOverride.facing ?? mc2.defaultFacing ?? 'down'
@@ -205,7 +206,8 @@ export class GameRuntime {
           speedMult: 1,
           targetSpeedMult: 1,
         }
-      } else {
+      } else if (stageStart) {
+        // characterPlacement is only honoured on the first scene of a stage
         const cp = scene.characterPlacement
         if (cp?.visible && mc2) {
           const facing = cp.facing ?? mc2.defaultFacing ?? 'down'
@@ -226,6 +228,10 @@ export class GameRuntime {
         } else {
           this.state.character = null
         }
+      } else {
+        // Scene transition with no arrival position set: hero does not appear.
+        // Set Arrival Position on the navigate_scene event action to fix this.
+        this.state.character = null
       }
 
       // Initialize NPC movement states for character objects with movement instructions
@@ -350,7 +356,7 @@ export class GameRuntime {
     if (!cinematic || cinematic.steps.length === 0) return
     // Load the cinematic's scene if needed
     if (cinematic.sceneId && cinematic.sceneId !== this.state.currentSceneId) {
-      this.loadScene(cinematic.sceneId)
+      this.loadScene(cinematic.sceneId, undefined, true)
     }
     this.state.cinematic = {
       steps: cinematic.steps,
@@ -476,7 +482,7 @@ export class GameRuntime {
     switch (completionAction) {
       case 'navigate_scene': {
         const scene = this.project.scenes.find((s) => s.id === completionValue || s.name === completionValue)
-        if (scene) this.loadScene(scene.id)
+        if (scene) this.loadScene(scene.id, undefined, true)
         break
       }
       case 'show_dialog': {
@@ -893,7 +899,7 @@ export class GameRuntime {
 
   private startGame(_buttonAction: string) {
     this.state.showTitleScreen = false
-    this.loadScene(this.state.currentSceneId)
+    this.loadScene(this.state.currentSceneId, undefined, true)
   }
 
   private renderScene(scene: Scene) {

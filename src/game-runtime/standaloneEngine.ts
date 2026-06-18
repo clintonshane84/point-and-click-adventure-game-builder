@@ -133,7 +133,7 @@ export class GameEngine {
       const ts=this.project.titleScreen;
       if(ts?.backgroundImageUrl) this._loadImage(ts.backgroundImageUrl);
     } else {
-      this._loadScene(this.state.currentSceneId);
+      this._loadScene(this.state.currentSceneId,undefined,true);
     }
     this._loop();
   }
@@ -153,7 +153,7 @@ export class GameEngine {
     this.start();
   }
 
-  _loadScene(sceneId, entryOverride) {
+  _loadScene(sceneId, entryOverride, stageStart=false) {
     this.state.currentSceneId = sceneId;
     this.state.activeHotspots = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
@@ -177,22 +177,18 @@ export class GameEngine {
           }
         });
       }
-      // Resolve spawn: entryOverride (from exit zone) → characterPlacement → null
+      // Resolve spawn: entryOverride → characterPlacement (stage start only) → null
       if(entryOverride&&mc){
         const facing=entryOverride.facing||mc.defaultFacing||'down';
         this.state.character={x:entryOverride.x,y:entryOverride.y,waypoints:[],waypointIndex:0,facing,moving:false,animFrame:this._getAnimStartFrame(facing),animTimer:0,scale:1,targetScale:1,speedMult:1,targetSpeedMult:1};
+      } else if(stageStart) {
+        const cp=scene.characterPlacement;
+        if(cp?.visible&&mc){
+          const facing=cp.facing||mc.defaultFacing||'down';
+          this.state.character={x:cp.x,y:cp.y,waypoints:[],waypointIndex:0,facing,moving:false,animFrame:this._getAnimStartFrame(facing),animTimer:0,scale:1,targetScale:1,speedMult:1,targetSpeedMult:1};
+        } else { this.state.character=null; }
       } else {
-        const cp = scene.characterPlacement;
-        if (cp?.visible && mc) {
-          const facing = cp.facing || mc.defaultFacing || 'down';
-          this.state.character = {
-            x: cp.x, y: cp.y,
-            waypoints: [], waypointIndex: 0,
-            facing, moving: false,
-            animFrame: this._getAnimStartFrame(facing), animTimer: 0,
-            scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
-          };
-        } else { this.state.character = null; }
+        this.state.character=null;
       }
       // Initialize NPC movement states
       const npcStateMap=new Map();
@@ -408,7 +404,7 @@ export class GameEngine {
 
   _startGame(_action){
     this.state.showTitleScreen=false;
-    this._loadScene(this.state.currentSceneId);
+    this._loadScene(this.state.currentSceneId,undefined,true);
   }
 
   _updateNpcs(dt,scene){
@@ -630,7 +626,7 @@ export class GameEngine {
   _playCinematic(cinematicId){
     const cine=(this.project.cinematics||[]).find(c=>c.id===cinematicId);
     if(!cine||cine.steps.length===0) return;
-    if(cine.sceneId&&cine.sceneId!==this.state.currentSceneId) this._loadScene(cine.sceneId);
+    if(cine.sceneId&&cine.sceneId!==this.state.currentSceneId) this._loadScene(cine.sceneId,undefined,true);
     this.state.cinematic={
       steps:cine.steps,
       stepIndex:0,
@@ -730,7 +726,7 @@ export class GameEngine {
     switch(ca){
       case 'navigate_scene':{
         const s=this.project.scenes.find(s=>s.id===cv||s.name===cv);
-        if(s) this._loadScene(s.id);
+        if(s) this._loadScene(s.id,undefined,true);
         break;
       }
       case 'show_dialog': this.state.dialogText=cv; break;

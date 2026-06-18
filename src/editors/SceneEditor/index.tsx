@@ -1448,11 +1448,11 @@ export function SceneEditor() {
               </div>
             </div>
 
-            {/* Character start position */}
+            {/* Stage start position — only used when this is the first scene of a stage */}
             <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1">
                 <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide flex items-center gap-1">
-                  <User size={11} /> Character Start
+                  <User size={11} /> Stage Start Position
                 </span>
                 <input
                   type="checkbox"
@@ -1460,10 +1460,12 @@ export function SceneEditor() {
                   onChange={(e) =>
                     updateSceneCharacterPlacement(activeScene.id, { visible: e.target.checked })
                   }
-                  title="Show character in this scene"
+                  title="Enable hero spawn for stage start"
                   className="rounded"
                 />
               </div>
+
+              <p className="text-xs text-gray-500 mb-2">Used only when starting a stage. For scene-to-scene travel set <span className="text-gray-400">Arrival Position</span> on each Navigate to Scene event.</p>
 
               {activeScene.characterPlacement?.visible && (
                 <div className="space-y-2">

@@ -347,7 +347,7 @@ export function EventEditor() {
                           ))}
                         </select>
                         <div className="border border-gray-600 rounded p-2 bg-gray-800 space-y-1.5">
-                          <p className="text-xs text-gray-400 font-medium">Arrival position <span className="text-gray-500 font-normal">(optional — overrides scene start)</span></p>
+                          <p className="text-xs text-gray-400 font-medium">Arrival Position <span className="text-gray-500 font-normal">— where the hero appears in the destination scene</span></p>
                           <div className="flex gap-2">
                             <label className="flex items-center gap-1 flex-1 text-xs text-gray-400">
                               X

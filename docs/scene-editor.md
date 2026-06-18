@@ -81,16 +81,16 @@ Set the scene background by:
 
 ---
 
-## Main Character Placement
+## Stage Start Position
 
-Each scene stores where your **main character** starts:
+Each scene has a **Stage Start Position** — where the hero spawns when starting a new stage.
 
-1. Toggle the **Character Placement** panel.
+1. Toggle the **Stage Start Position** panel in the right sidebar.
 2. Enable visibility for the scene.
-3. Drag the character marker on the canvas, or type X/Y coordinates.
+3. Type X/Y coordinates or drag the character marker on the canvas.
 4. Set the default **facing direction** (up / down / left / right).
 
-The character respects this position when the scene loads during gameplay.
+> **Important**: this position is only honoured when the scene is the *first scene of a stage* (game start, cinematic completion, or stage advancement). When the hero travels between scenes via exit zones, their spawn position comes from the **Arrival Position** on each *Navigate to Scene* event action — not this field. If no Arrival Position is set on a transition, the hero does not appear in the destination scene.
 
 ---
 
