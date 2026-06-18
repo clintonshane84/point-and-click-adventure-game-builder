@@ -149,7 +149,7 @@ export class GameRuntime {
 
   // ── Scene loading ─────────────────────────────────────────────────────────
 
-  private loadScene(sceneId: string) {
+  private loadScene(sceneId: string, entryOverride?: { x: number; y: number; facing?: FacingDirection }) {
     this.state.currentSceneId = sceneId
     this.state.activeHotspots = new Set()
     if (!this.state.visitedScenes.includes(sceneId)) {
@@ -187,13 +187,13 @@ export class GameRuntime {
         }
       }
 
-      // Initialize character position from scene placement
-      const cp = scene.characterPlacement
-      if (cp?.visible && mc) {
-        const facing = cp.facing ?? mc.defaultFacing ?? 'down'
+      // Resolve character spawn: entryOverride (from exit zone) → characterPlacement → null
+      const mc2 = this.project.mainCharacter
+      if (entryOverride && mc2) {
+        const facing = entryOverride.facing ?? mc2.defaultFacing ?? 'down'
         this.state.character = {
-          x: cp.x,
-          y: cp.y,
+          x: entryOverride.x,
+          y: entryOverride.y,
           waypoints: [],
           waypointIndex: 0,
           facing,
@@ -206,7 +206,26 @@ export class GameRuntime {
           targetSpeedMult: 1,
         }
       } else {
-        this.state.character = null
+        const cp = scene.characterPlacement
+        if (cp?.visible && mc2) {
+          const facing = cp.facing ?? mc2.defaultFacing ?? 'down'
+          this.state.character = {
+            x: cp.x,
+            y: cp.y,
+            waypoints: [],
+            waypointIndex: 0,
+            facing,
+            moving: false,
+            animFrame: this.getAnimStartFrame(facing),
+            animTimer: 0,
+            scale: 1,
+            targetScale: 1,
+            speedMult: 1,
+            targetSpeedMult: 1,
+          }
+        } else {
+          this.state.character = null
+        }
       }
 
       // Initialize NPC movement states for character objects with movement instructions
@@ -1221,7 +1240,12 @@ export class GameRuntime {
         const scene = this.project.scenes.find(
           (s) => s.id === action.value || s.name === action.value
         )
-        if (scene) this.loadScene(scene.id)
+        if (scene) {
+          const entryOverride = (action.entryX != null && action.entryY != null)
+            ? { x: action.entryX, y: action.entryY, facing: action.entryFacing }
+            : undefined
+          this.loadScene(scene.id, entryOverride)
+        }
         break
       }
       case 'show_dialog':

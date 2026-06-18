@@ -142,6 +142,9 @@ export interface EventAction {
   type: ActionType
   value: string
   delay?: number
+  entryX?: number          // hero X in destination scene (navigate_scene only)
+  entryY?: number          // hero Y in destination scene (navigate_scene only)
+  entryFacing?: FacingDirection  // hero facing in destination scene (navigate_scene only)
 }
 
 export interface EventTrigger {

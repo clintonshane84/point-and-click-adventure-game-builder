@@ -153,7 +153,7 @@ export class GameEngine {
     this.start();
   }
 
-  _loadScene(sceneId) {
+  _loadScene(sceneId, entryOverride) {
     this.state.currentSceneId = sceneId;
     this.state.activeHotspots = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
@@ -177,17 +177,23 @@ export class GameEngine {
           }
         });
       }
-      const cp = scene.characterPlacement;
-      if (cp?.visible && mc) {
-        const facing = cp.facing || mc.defaultFacing || 'down';
-        this.state.character = {
-          x: cp.x, y: cp.y,
-          waypoints: [], waypointIndex: 0,
-          facing, moving: false,
-          animFrame: this._getAnimStartFrame(facing), animTimer: 0,
-          scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
-        };
-      } else { this.state.character = null; }
+      // Resolve spawn: entryOverride (from exit zone) → characterPlacement → null
+      if(entryOverride&&mc){
+        const facing=entryOverride.facing||mc.defaultFacing||'down';
+        this.state.character={x:entryOverride.x,y:entryOverride.y,waypoints:[],waypointIndex:0,facing,moving:false,animFrame:this._getAnimStartFrame(facing),animTimer:0,scale:1,targetScale:1,speedMult:1,targetSpeedMult:1};
+      } else {
+        const cp = scene.characterPlacement;
+        if (cp?.visible && mc) {
+          const facing = cp.facing || mc.defaultFacing || 'down';
+          this.state.character = {
+            x: cp.x, y: cp.y,
+            waypoints: [], waypointIndex: 0,
+            facing, moving: false,
+            animFrame: this._getAnimStartFrame(facing), animTimer: 0,
+            scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
+          };
+        } else { this.state.character = null; }
+      }
       // Initialize NPC movement states
       const npcStateMap=new Map();
       (scene.objects||[]).filter(o=>o.type==='character'&&o.npcId&&o.movementInstruction&&o.movementInstruction!=='none').forEach(o=>{
@@ -597,8 +603,12 @@ export class GameEngine {
   _execAction(action){
     switch(action.type){
       case 'navigate_scene':{
-        const s=this.project.scenes.find(s=>s.id===action.value||s.name===action.value);
-        if(s) this._loadScene(s.id); break;
+        const s=this.project.scenes.find(sc=>sc.id===action.value||sc.name===action.value);
+        if(s){
+          const eo=(action.entryX!=null&&action.entryY!=null)?{x:action.entryX,y:action.entryY,facing:action.entryFacing}:undefined;
+          this._loadScene(s.id,eo);
+        }
+        break;
       }
       case 'show_dialog': this.state.dialogText=action.value; break;
       case 'set_variable':{
