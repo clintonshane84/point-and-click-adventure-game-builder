@@ -190,6 +190,14 @@ export class GameEngine {
       } else {
         this.state.character=null;
       }
+      // Pre-seed activeHotspots so spawn-position hotspots don't fire 'enter' immediately
+      if(this.state.character&&mc){
+        const sfx=this.state.character.x+mc.width/2,sfy=this.state.character.y+mc.height;
+        for(const obj of scene.objects){
+          if(obj.type!=='hotspot') continue;
+          if(sfx>=obj.x&&sfx<=obj.x+obj.width&&sfy>=obj.y&&sfy<=obj.y+obj.height) this.state.activeHotspots.add(obj.id);
+        }
+      }
       // Initialize NPC movement states
       const npcStateMap=new Map();
       (scene.objects||[]).filter(o=>o.type==='character'&&o.npcId&&o.movementInstruction&&o.movementInstruction!=='none').forEach(o=>{

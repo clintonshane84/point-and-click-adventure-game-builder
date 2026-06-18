@@ -234,6 +234,22 @@ export class GameRuntime {
         this.state.character = null
       }
 
+      // Pre-seed activeHotspots with any hotspot zones the hero spawns inside.
+      // Without this, checkHotspots fires 'enter' immediately on the next frame
+      // for any hotspot at the spawn position — which would trigger navigate_scene
+      // again and erase the character before the player ever sees them.
+      if (this.state.character && mc2) {
+        const spawnFx = this.state.character.x + mc2.width / 2
+        const spawnFy = this.state.character.y + mc2.height
+        for (const obj of scene.objects) {
+          if (obj.type !== 'hotspot') continue
+          if (spawnFx >= obj.x && spawnFx <= obj.x + obj.width &&
+              spawnFy >= obj.y && spawnFy <= obj.y + obj.height) {
+            this.state.activeHotspots.add(obj.id)
+          }
+        }
+      }
+
       // Initialize NPC movement states for character objects with movement instructions
       const npcStateMap = new Map<string, NpcRuntimeState>()
       scene.objects
