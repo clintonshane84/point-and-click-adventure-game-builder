@@ -312,7 +312,14 @@ export class GameRuntime {
     const fx = char.x + mc.width / 2
     const fy = char.y + mc.height
 
+    // Capture the scene ID so we can detect mid-loop transitions.
+    // If an enter/exit event triggers navigate_scene, the scene changes and
+    // the remaining objects belong to the old scene — stop immediately to
+    // avoid evaluating old-scene hotspots against the new arrival position.
+    const sceneIdAtEntry = this.state.currentSceneId
+
     for (const obj of scene.objects) {
+      if (this.state.currentSceneId !== sceneIdAtEntry) break
       if (obj.type !== 'hotspot') continue
       const vis = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!

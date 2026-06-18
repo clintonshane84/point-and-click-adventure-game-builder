@@ -231,7 +231,9 @@ export class GameEngine {
     const char=this.state.character,mc=this.project.mainCharacter;
     if(!char||!mc) return;
     const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    const sceneIdAtEntry=this.state.currentSceneId;
     for(const obj of scene.objects){
+      if(this.state.currentSceneId!==sceneIdAtEntry) break;
       if(obj.type!=='hotspot') continue;
       const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
       if(!vis) continue;
