@@ -220,7 +220,7 @@ export class GameEngine {
     if(!this.state.showTitleScreen){
       this._updateCharacter(dt);
       const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._updateNpcs(dt,scene);}
+      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._updateNpcs(dt,scene);}
       if(this.state.cinematic) this._updateCinematic(dt);
     }
     this._render();
@@ -260,6 +260,35 @@ export class GameEngine {
       if(fx>=z.x&&fx<=z.x+z.width&&fy>=z.y&&fy<=z.y+z.height){ts=z.scale;tm=z.speedMultiplier;break;}
     }
     char.targetScale=ts; char.targetSpeedMult=tm;
+  }
+
+  _checkSceneEdges(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    if(!scene.exits||scene.exits.length===0) return;
+    const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    let side=null;
+    if(fx<=0) side='left';
+    else if(fx>=scene.width) side='right';
+    else if(fy<=0) side='top';
+    else if(fy>=scene.height) side='bottom';
+    if(!side) return;
+    const exitDef=scene.exits.find(e=>e.side===side);
+    if(!exitDef) return;
+    const targetScene=this.project.scenes.find(s=>s.id===exitDef.targetSceneId);
+    if(!targetScene) return;
+    const sceneIdAtEntry=this.state.currentSceneId;
+    const clampedY=Math.max(0,Math.min(targetScene.height-mc.height,char.y));
+    const clampedX=Math.max(0,Math.min(targetScene.width-mc.width,char.x));
+    let ax,ay;
+    if(side==='right'){ax=40;ay=clampedY;}
+    else if(side==='left'){ax=targetScene.width-40-mc.width;ay=clampedY;}
+    else if(side==='top'){ax=clampedX;ay=targetScene.height-40-mc.height;}
+    else{ax=clampedX;ay=40;}
+    const inferredFacing=side==='right'?'right':side==='left'?'left':side==='top'?'up':'down';
+    const facing=exitDef.entryFacing||inferredFacing;
+    if(this.state.currentSceneId!==sceneIdAtEntry) return;
+    this._loadScene(targetScene.id,{x:ax,y:ay,facing});
   }
 
   _updateCharacter(dt) {

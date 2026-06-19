@@ -68,6 +68,14 @@ export interface ScaleZone {
   speedMultiplier: number // walk speed multiplier inside zone (0.1–1.0)
 }
 
+export type SceneExitSide = 'left' | 'right' | 'top' | 'bottom'
+
+export interface SceneExit {
+  side: SceneExitSide
+  targetSceneId: string         // destination scene ID
+  entryFacing?: FacingDirection // optional facing override; if omitted, inferred from direction
+}
+
 export interface CharacterAnimation {
   spriteSheetId: string
   animationId: string
@@ -121,6 +129,7 @@ export interface Scene {
   characterPlacement?: CharacterPlacement
   blockedZones?: BlockedZone[]
   scaleZones?: ScaleZone[]
+  exits?: SceneExit[]
 }
 
 // Event types

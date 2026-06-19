@@ -9,7 +9,7 @@ import {
 import { useGameStore } from '../../store/useGameStore'
 import { useAiStore } from '../../store/useAiStore'
 import { AiGenerateModal } from '../../components/AiGenerateModal'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter, NpcMovementInstruction } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter, NpcMovementInstruction, SceneExitSide } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -1445,6 +1445,66 @@ export function SceneEditor() {
                   </div>
                 )}
               </div>
+              </div>
+            </div>
+
+            {/* Scene Exits */}
+            <div>
+              <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide block mb-2 flex items-center gap-1">
+                <Crosshair size={11} /> Scene Exits
+              </span>
+              <div className="space-y-2">
+                {(['left', 'right', 'top', 'bottom'] as SceneExitSide[]).map((side) => {
+                  const exit = (activeScene.exits ?? []).find((e) => e.side === side)
+                  const otherScenes = scenes.filter((s) => s.id !== activeScene.id)
+
+                  const handleTargetChange = (targetSceneId: string) => {
+                    const newExits = (activeScene.exits ?? []).filter((e) => e.side !== side)
+                    if (targetSceneId) {
+                      newExits.push({ side, targetSceneId, entryFacing: exit?.entryFacing })
+                    }
+                    useGameStore.getState().updateScene(activeScene.id, { exits: newExits })
+                  }
+
+                  const handleFacingChange = (entryFacing: string) => {
+                    const newExits = (activeScene.exits ?? []).map((e) =>
+                      e.side === side
+                        ? { ...e, entryFacing: entryFacing ? (entryFacing as FacingDirection) : undefined }
+                        : e
+                    )
+                    useGameStore.getState().updateScene(activeScene.id, { exits: newExits })
+                  }
+
+                  const sideLabel = side.charAt(0).toUpperCase() + side.slice(1)
+                  return (
+                    <div key={side} className="bg-gray-700/50 rounded p-2 space-y-1">
+                      <span className="text-xs text-gray-400 font-medium">{sideLabel}</span>
+                      <select
+                        value={exit?.targetSceneId ?? ''}
+                        onChange={(e) => handleTargetChange(e.target.value)}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-orange-500"
+                      >
+                        <option value="">— none —</option>
+                        {otherScenes.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                      {exit?.targetSceneId && (
+                        <select
+                          value={exit?.entryFacing ?? ''}
+                          onChange={(e) => handleFacingChange(e.target.value)}
+                          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-orange-500"
+                        >
+                          <option value="">— auto facing —</option>
+                          <option value="down">↓ down</option>
+                          <option value="up">↑ up</option>
+                          <option value="left">← left</option>
+                          <option value="right">→ right</option>
+                        </select>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
 

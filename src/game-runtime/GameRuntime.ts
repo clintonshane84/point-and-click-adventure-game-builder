@@ -1,7 +1,7 @@
 import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
-  CinematicCompletionAction, NpcMovementInstruction,
+  CinematicCompletionAction, NpcMovementInstruction, SceneExitSide,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -294,6 +294,7 @@ export class GameRuntime {
         this.updateNpcs(dt, scene)
         this.checkHotspots(scene)
         this.checkScaleZones(scene)
+        this.checkSceneEdges(scene)
       }
       if (this.state.cinematic) this.updateCinematic(dt)
     }
@@ -370,6 +371,65 @@ export class GameRuntime {
 
     char.targetScale = targetScale
     char.targetSpeedMult = targetSpeedMult
+  }
+
+  // ── Scene edge detection ─────────────────────────────────────────────────
+
+  private checkSceneEdges(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+    if (!scene.exits || scene.exits.length === 0) return
+
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    let crossedSide: SceneExitSide | null = null
+    if (fx <= 0) crossedSide = 'left'
+    else if (fx >= scene.width) crossedSide = 'right'
+    else if (fy <= 0) crossedSide = 'top'
+    else if (fy >= scene.height) crossedSide = 'bottom'
+
+    if (!crossedSide) return
+
+    const exitDef = scene.exits.find((e) => e.side === crossedSide)
+    if (!exitDef) return
+
+    const targetScene = this.project.scenes.find((s) => s.id === exitDef.targetSceneId)
+    if (!targetScene) return
+
+    // Guard against mid-frame re-entry
+    const sceneIdAtEntry = this.state.currentSceneId
+
+    let arrivalX: number
+    let arrivalY: number
+    const clampedY = Math.max(0, Math.min(targetScene.height - mc.height, char.y))
+    const clampedX = Math.max(0, Math.min(targetScene.width - mc.width, char.x))
+
+    if (crossedSide === 'right') {
+      arrivalX = 40
+      arrivalY = clampedY
+    } else if (crossedSide === 'left') {
+      arrivalX = targetScene.width - 40 - mc.width
+      arrivalY = clampedY
+    } else if (crossedSide === 'top') {
+      arrivalX = clampedX
+      arrivalY = targetScene.height - 40 - mc.height
+    } else {
+      // bottom
+      arrivalX = clampedX
+      arrivalY = 40
+    }
+
+    const inferredFacing: FacingDirection =
+      crossedSide === 'right' ? 'right' :
+      crossedSide === 'left'  ? 'left'  :
+      crossedSide === 'top'   ? 'up'    : 'down'
+
+    const facing: FacingDirection = exitDef.entryFacing ?? inferredFacing
+
+    if (this.state.currentSceneId !== sceneIdAtEntry) return
+    this.loadScene(targetScene.id, { x: arrivalX, y: arrivalY, facing })
   }
 
   // ── Cinematic execution ───────────────────────────────────────────────────
