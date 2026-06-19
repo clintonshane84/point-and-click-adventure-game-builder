@@ -375,6 +375,53 @@ export class GameRuntime {
 
   // ── Scene edge detection ─────────────────────────────────────────────────
 
+  private findSafeArrival(
+    scene: Scene,
+    mc: { width: number; height: number },
+    nomX: number,
+    nomY: number,
+    side: SceneExitSide,
+  ): { x: number; y: number } {
+    const padX = Math.max(0, mc.width / 2 - 1)
+    const padY = Math.max(0, mc.height / 2 - 1)
+    const zones = scene.blockedZones ?? []
+
+    const overlaps = (x: number, y: number): boolean => {
+      for (const z of zones) {
+        if (
+          x - padX < z.x + z.width &&
+          x + mc.width + padX > z.x &&
+          y - padY < z.y + z.height &&
+          y + mc.height + padY > z.y
+        ) return true
+      }
+      return false
+    }
+
+    if (!overlaps(nomX, nomY)) return { x: nomX, y: nomY }
+
+    const step = 4
+    if (side === 'left' || side === 'right') {
+      const maxScan = scene.height
+      for (let d = step; d <= maxScan; d += step) {
+        for (const cy of [nomY + d, nomY - d]) {
+          const clamped = Math.max(0, Math.min(scene.height - mc.height, cy))
+          if (!overlaps(nomX, clamped)) return { x: nomX, y: clamped }
+        }
+      }
+    } else {
+      const maxScan = scene.width
+      for (let d = step; d <= maxScan; d += step) {
+        for (const cx of [nomX + d, nomX - d]) {
+          const clamped = Math.max(0, Math.min(scene.width - mc.width, cx))
+          if (!overlaps(clamped, nomY)) return { x: clamped, y: nomY }
+        }
+      }
+    }
+
+    return { x: nomX, y: nomY }
+  }
+
   private checkSceneEdges(scene: Scene) {
     const char = this.state.character
     const mc = this.project.mainCharacter
@@ -406,20 +453,26 @@ export class GameRuntime {
     const clampedY = Math.max(0, Math.min(targetScene.height - mc.height, char.y))
     const clampedX = Math.max(0, Math.min(targetScene.width - mc.width, char.x))
 
+    let nomX: number
+    let nomY: number
     if (crossedSide === 'right') {
-      arrivalX = 40
-      arrivalY = clampedY
+      nomX = 40
+      nomY = clampedY
     } else if (crossedSide === 'left') {
-      arrivalX = targetScene.width - 40 - mc.width
-      arrivalY = clampedY
+      nomX = targetScene.width - 40 - mc.width
+      nomY = clampedY
     } else if (crossedSide === 'top') {
-      arrivalX = clampedX
-      arrivalY = targetScene.height - 40 - mc.height
+      nomX = clampedX
+      nomY = targetScene.height - 40 - mc.height
     } else {
       // bottom
-      arrivalX = clampedX
-      arrivalY = 40
+      nomX = clampedX
+      nomY = 40
     }
+
+    const safe = this.findSafeArrival(targetScene, mc, nomX, nomY, crossedSide)
+    arrivalX = safe.x
+    arrivalY = safe.y
 
     const inferredFacing: FacingDirection =
       crossedSide === 'right' ? 'right' :

@@ -262,6 +262,36 @@ export class GameEngine {
     char.targetScale=ts; char.targetSpeedMult=tm;
   }
 
+  _findSafeArrival(scene,mc,nomX,nomY,side) {
+    const padX=Math.max(0,mc.width/2-1),padY=Math.max(0,mc.height/2-1);
+    const zones=scene.blockedZones||[];
+    const overlaps=(x,y)=>{
+      for(const z of zones){
+        if(x-padX<z.x+z.width&&x+mc.width+padX>z.x&&y-padY<z.y+z.height&&y+mc.height+padY>z.y) return true;
+      }
+      return false;
+    };
+    if(!overlaps(nomX,nomY)) return {x:nomX,y:nomY};
+    const step=4;
+    if(side==='left'||side==='right'){
+      const maxScan=scene.height;
+      for(let d=step;d<=maxScan;d+=step){
+        for(const cy of [nomY+d,nomY-d]){
+          const c=Math.max(0,Math.min(scene.height-mc.height,cy));
+          if(!overlaps(nomX,c)) return {x:nomX,y:c};
+        }
+      }
+    } else {
+      const maxScan=scene.width;
+      for(let d=step;d<=maxScan;d+=step){
+        for(const cx of [nomX+d,nomX-d]){
+          const c=Math.max(0,Math.min(scene.width-mc.width,cx));
+          if(!overlaps(c,nomY)) return {x:c,y:nomY};
+        }
+      }
+    }
+    return {x:nomX,y:nomY};
+  }
   _checkSceneEdges(scene) {
     const char=this.state.character,mc=this.project.mainCharacter;
     if(!char||!mc) return;
@@ -279,15 +309,16 @@ export class GameEngine {
     const sceneIdAtEntry=this.state.currentSceneId;
     const clampedY=Math.max(0,Math.min(targetScene.height-mc.height,char.y));
     const clampedX=Math.max(0,Math.min(targetScene.width-mc.width,char.x));
-    let ax,ay;
-    if(side==='right'){ax=40;ay=clampedY;}
-    else if(side==='left'){ax=targetScene.width-40-mc.width;ay=clampedY;}
-    else if(side==='top'){ax=clampedX;ay=targetScene.height-40-mc.height;}
-    else{ax=clampedX;ay=40;}
+    let nomX,nomY;
+    if(side==='right'){nomX=40;nomY=clampedY;}
+    else if(side==='left'){nomX=targetScene.width-40-mc.width;nomY=clampedY;}
+    else if(side==='top'){nomX=clampedX;nomY=targetScene.height-40-mc.height;}
+    else{nomX=clampedX;nomY=40;}
+    const safe=this._findSafeArrival(targetScene,mc,nomX,nomY,side);
     const inferredFacing=side==='right'?'right':side==='left'?'left':side==='top'?'up':'down';
     const facing=exitDef.entryFacing||inferredFacing;
     if(this.state.currentSceneId!==sceneIdAtEntry) return;
-    this._loadScene(targetScene.id,{x:ax,y:ay,facing});
+    this._loadScene(targetScene.id,{x:safe.x,y:safe.y,facing});
   }
 
   _updateCharacter(dt) {
