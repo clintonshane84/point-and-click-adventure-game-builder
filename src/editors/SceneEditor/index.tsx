@@ -1006,11 +1006,14 @@ export function SceneEditor() {
           </span>
         </div>
 
+        {/* Scrollable content area — all right-panel sections scroll as one */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+
         {/* Scale zone mode: show selected scale zone properties */}
         {scaleMode && (() => {
           const zone = (activeScene?.scaleZones ?? []).find((z) => z.id === selectedScaleZoneId)
           if (!zone || !activeScene) return (
-            <div className="flex-1 flex items-center justify-center p-4">
+            <div className="flex items-center justify-center py-10 px-4">
               <p className="text-gray-500 text-xs text-center leading-relaxed">
                 Click &amp; drag on the canvas to create a scale zone.<br />
                 <span className="text-gray-600">Click an existing zone to edit it.</span>
@@ -1018,7 +1021,7 @@ export function SceneEditor() {
             </div>
           )
           return (
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className="p-3 space-y-3">
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Label</label>
                 <input
@@ -1080,7 +1083,7 @@ export function SceneEditor() {
         {pathMode && (() => {
           const zone = (activeScene?.blockedZones ?? []).find((z) => z.id === selectedZoneId)
           if (!zone || !activeScene) return (
-            <div className="flex-1 flex items-center justify-center p-4">
+            <div className="flex items-center justify-center py-10 px-4">
               <p className="text-gray-500 text-xs text-center leading-relaxed">
                 Click &amp; drag on the canvas to create a blocked zone.<br />
                 <span className="text-gray-600">Click an existing zone to edit it.</span>
@@ -1088,7 +1091,7 @@ export function SceneEditor() {
             </div>
           )
           return (
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className="p-3 space-y-3">
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Label</label>
                 <input
@@ -1129,7 +1132,7 @@ export function SceneEditor() {
         })()}
 
         {selectedObj && activeScene && !pathMode && !scaleMode ? (
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          <div className="p-3 space-y-3">
 
             {/* Name */}
             <div>
@@ -1354,7 +1357,7 @@ export function SceneEditor() {
             )}
           </div>
         ) : !pathMode && !scaleMode ? (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex items-center justify-center py-10">
             <p className="text-gray-500 text-xs text-center px-4 leading-relaxed">
               Select an object to edit its properties.<br />
               <span className="text-gray-600">Double-click a scene name to rename it.</span>
@@ -1364,7 +1367,7 @@ export function SceneEditor() {
 
         {/* Scene properties */}
         {activeScene && (
-          <div className="border-t border-gray-700 p-3 space-y-3 shrink-0">
+          <div className="border-t border-gray-700 p-3 space-y-3">
             <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide block">Scene</span>
 
             <div>
@@ -1573,6 +1576,8 @@ export function SceneEditor() {
             </div>
           </div>
         )}
+
+        </div>{/* end scrollable content */}
       </div>
 
       {/* AI Generate Background Modal */}
