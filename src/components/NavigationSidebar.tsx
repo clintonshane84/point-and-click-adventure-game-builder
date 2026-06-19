@@ -89,6 +89,14 @@ export function NavigationSidebar() {
         {/* Build tools */}
         {buildItems.map(renderItem)}
       </div>
+
+      {/* Version badge */}
+      <div className="shrink-0 border-t border-gray-700/60 flex items-center justify-center h-8">
+        <span className="group-hover:hidden text-gray-600 text-xs font-mono">v</span>
+        <span className="hidden group-hover:block text-gray-600 text-xs font-mono px-3">
+          v{__APP_VERSION__}
+        </span>
+      </div>
     </nav>
   )
 }
