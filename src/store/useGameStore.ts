@@ -28,6 +28,7 @@ import type {
   BlockedZone,
   ScaleZone,
   TeleportZone,
+  MiniGame,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -215,6 +216,11 @@ interface GameStore {
   addTeleportZone: (sceneId: string, zone: TeleportZone) => void
   updateTeleportZone: (sceneId: string, zoneId: string, updates: Partial<TeleportZone>) => void
   deleteTeleportZone: (sceneId: string, zoneId: string) => void
+
+  // Mini-game actions
+  addMiniGame: (mg: MiniGame) => void
+  updateMiniGame: (id: string, updates: Partial<MiniGame>) => void
+  deleteMiniGame: (id: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -236,6 +242,7 @@ export const useGameStore = create<GameStore>((set) => ({
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
         npcs: project.npcs ?? [],
         cinematics: project.cinematics ?? [],
+        miniGames: project.miniGames ?? [],
         updatedAt: new Date().toISOString(),
       },
     }),
@@ -958,6 +965,36 @@ export const useGameStore = create<GameStore>((set) => ({
           ;[steps[idx], steps[target]] = [steps[target], steps[idx]]
           return { ...c, steps }
         }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Mini-game actions
+  addMiniGame: (mg) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        miniGames: [...(state.project.miniGames ?? []), mg],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateMiniGame: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        miniGames: (state.project.miniGames ?? []).map((m) =>
+          m.id === id ? { ...m, ...updates } : m
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteMiniGame: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        miniGames: (state.project.miniGames ?? []).filter((m) => m.id !== id),
         updatedAt: new Date().toISOString(),
       },
     })),

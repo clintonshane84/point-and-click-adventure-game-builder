@@ -49,6 +49,7 @@ export default defineConfig({
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${title}</title>
     <link rel="stylesheet" href="/src/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   </head>
   <body>
     <div id="app">
@@ -82,6 +83,13 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
 
   // ── src/game-data.json ───────────────────────────────────────────────────────
   zip.file('src/game-data.json', JSON.stringify(project, null, 2))
+
+  // ── mini-game source files ───────────────────────────────────────────────────
+  for (const mg of project.miniGames ?? []) {
+    if (mg.source) {
+      zip.file(`src/minigames/${mg.id}.js`, mg.source)
+    }
+  }
 
   // ── src/main.js ──────────────────────────────────────────────────────────────
   zip.file('src/main.js', `import { GameEngine } from './engine.js'

@@ -15,6 +15,7 @@ import { GoalEditor } from './editors/GoalEditor'
 import { CursorEditor } from './editors/CursorEditor'
 import { CharacterEditor } from './editors/CharacterEditor'
 import { CinematicEditor } from './editors/CinematicEditor'
+import { MiniGameEditor } from './editors/MiniGameEditor'
 import { PreviewGameManager } from './editors/PreviewGameManager'
 import { ExportGameManager } from './editors/ExportGameManager'
 import { saveProject, autoSave } from './lib/fileSystemStorage'
@@ -50,6 +51,7 @@ function App() {
       case 'cursor':      return <CursorEditor />
       case 'character':   return <CharacterEditor />
       case 'cinematic':   return <CinematicEditor />
+      case 'minigame':    return <MiniGameEditor />
       case 'preview':     return <PreviewGameManager />
       case 'export':      return <ExportGameManager />
       default:            return <SceneEditor />

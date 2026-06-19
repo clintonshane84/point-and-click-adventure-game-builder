@@ -121,6 +121,7 @@ export class GameEngine {
       cinematic: null,
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
+      miniGame: null,
     };
   }
 
@@ -723,6 +724,7 @@ export class GameEngine {
         break;
       }
       case 'play_cinematic': this._playCinematic(action.value); break;
+      case 'launch_minigame': this._launchMiniGame(action.value); break;
     }
   }
 
@@ -897,6 +899,68 @@ export class GameEngine {
     ctx.textAlign='center';
     ctx.textBaseline='middle';
     ctx.fillText(text,canvas.width/2,y+h/2);
+  }
+
+  async _loadPhaser(){
+    if(window.Phaser) return;
+    return new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
+      s.onload=()=>resolve();s.onerror=reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  async _loadMiniGameModule(source){
+    const blob=new Blob([source],{type:'text/javascript'});
+    const url=URL.createObjectURL(blob);
+    const mod=await import(url);
+    URL.revokeObjectURL(url);
+    return mod.default;
+  }
+
+  async _launchMiniGame(id){
+    const mg=(this.project.miniGames||[]).find(m=>m.id===id);
+    if(!mg?.source) return;
+    const returnSceneId=this.state.currentSceneId;
+    this.state.miniGame={returnSceneId,instance:null};
+    if(this.frameId!==null){cancelAnimationFrame(this.frameId);this.frameId=null;}
+    try{
+      await this._loadPhaser();
+      const mod=await this._loadMiniGameModule(mg.source);
+      const overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;z-index:9999;background:#000;display:flex;align-items:center;justify-content:center;';
+      const canvas=document.createElement('canvas');
+      canvas.width=800;canvas.height=600;
+      overlay.appendChild(canvas);
+      document.body.appendChild(overlay);
+      const teardown=(result,vars)=>{
+        this.state.miniGame?.instance?.destroy();
+        this.state.miniGame=null;
+        document.body.removeChild(overlay);
+        if(vars) Object.assign(this.state.variables,vars);
+        this.state.variables['minigame_result']=result;
+        this._loadScene(returnSceneId,undefined,false);
+        this.state.running=true;
+        this.lastFrameTime=0;
+        this._loop();
+      };
+      const context={
+        canvas,
+        Phaser:window.Phaser,
+        assets:(this.project.assets||[]).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type})),
+        variables:{...this.state.variables},
+        onComplete:(result,updatedVars)=>teardown(result,updatedVars),
+      };
+      const instance=mod.launch(context);
+      if(this.state.miniGame) this.state.miniGame.instance=instance;
+    }catch(err){
+      console.error('Mini-game error:',err);
+      this.state.miniGame=null;
+      this.state.running=true;
+      this.lastFrameTime=0;
+      this._loop();
+    }
   }
 
   _getCharSheet(facing){

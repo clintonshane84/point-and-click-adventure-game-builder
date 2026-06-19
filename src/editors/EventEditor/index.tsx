@@ -29,6 +29,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   play_animation: 'Play Animation',
   stop_animation: 'Stop Animation',
   play_cinematic: 'Play Cinematic',
+  launch_minigame: 'Launch Mini-Game',
 }
 
 interface EventFormState {
@@ -40,6 +41,7 @@ export function EventEditor() {
   const { project, addEvent, updateEvent, deleteEvent } = useGameStore()
   const { scenes, events } = project
   const cinematics = project.cinematics ?? []
+  const miniGames = project.miniGames ?? []
 
   const [selectedSceneId, setSelectedSceneId] = useState(scenes[0]?.id ?? '')
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
@@ -328,6 +330,21 @@ export function EventEditor() {
                         <option value="">— select cinematic —</option>
                         {cinematics.map((c) => (
                           <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    ) : action.type === 'launch_minigame' ? (
+                      <select
+                        value={action.value}
+                        onChange={(e) => {
+                          const updated = [...form.actions]
+                          updated[idx] = { ...updated[idx], value: e.target.value }
+                          setForm((f) => ({ ...f, actions: updated }))
+                        }}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">— select mini-game —</option>
+                        {miniGames.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </select>
                     ) : action.type === 'navigate_scene' ? (

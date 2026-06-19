@@ -7,6 +7,7 @@ export type EditorType =
   | 'sprite'
   | 'character'
   | 'cinematic'
+  | 'minigame'
   | 'settings'
   | 'titlescreen'
   | 'stage'
@@ -158,6 +159,7 @@ export type ActionType =
   | 'play_animation'
   | 'stop_animation'
   | 'play_cinematic'
+  | 'launch_minigame'
 
 export interface EventAction {
   id: string
@@ -346,6 +348,14 @@ export interface CursorConfig {
   activeState: CursorStateName
 }
 
+// Mini-game types
+export interface MiniGame {
+  id: string
+  name: string
+  description: string
+  source: string        // full JS module source (ES module with default export)
+}
+
 // Cinematic types
 export type CinematicStepType =
   | 'walk_to'
@@ -405,4 +415,5 @@ export interface GameProject {
   stages: Stage[]
   goals: Goal[]
   cursorConfig: CursorConfig
+  miniGames?: MiniGame[]
 }

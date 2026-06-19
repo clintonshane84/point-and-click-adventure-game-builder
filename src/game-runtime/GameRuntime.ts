@@ -67,6 +67,7 @@ interface GameState {
   activeHotspots: Set<string>
   activeTeleportZones: Set<string>
   cinematic: CinematicPlayState | null
+  miniGame: { returnSceneId: string; instance: { destroy(): void } | null } | null
   npcStates: Map<string, NpcRuntimeState>
   showTitleScreen: boolean
 }
@@ -113,6 +114,7 @@ export class GameRuntime {
       cinematic: null,
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
+      miniGame: null,
     }
   }
 
@@ -1474,6 +1476,91 @@ export class GameRuntime {
         this.playCinematic(action.value)
         break
       }
+      case 'launch_minigame': {
+        this.launchMiniGame(action.value)
+        break
+      }
+    }
+  }
+
+  // ── Mini-game launcher ────────────────────────────────────────────────────
+
+  private async loadPhaser(): Promise<void> {
+    if ((window as any).Phaser) return
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js'
+      s.onload = () => resolve()
+      s.onerror = reject
+      document.head.appendChild(s)
+    })
+  }
+
+  private async loadMiniGameModule(source: string): Promise<any> {
+    const blob = new Blob([source], { type: 'text/javascript' })
+    const url = URL.createObjectURL(blob)
+    const mod = await import(/* @vite-ignore */ url)
+    URL.revokeObjectURL(url)
+    return mod.default
+  }
+
+  private async launchMiniGame(id: string) {
+    const mg = (this.project.miniGames ?? []).find((m) => m.id === id)
+    if (!mg?.source) return
+
+    const returnSceneId = this.state.currentSceneId
+    this.state.miniGame = { returnSceneId, instance: null }
+
+    if (this.frameId !== null) {
+      cancelAnimationFrame(this.frameId)
+      this.frameId = null
+    }
+
+    try {
+      await this.loadPhaser()
+      const mod = await this.loadMiniGameModule(mg.source)
+
+      // Create full-viewport overlay
+      const overlay = document.createElement('div')
+      overlay.style.cssText =
+        'position:fixed;inset:0;z-index:9999;background:#000;display:flex;align-items:center;justify-content:center;'
+
+      const canvas = document.createElement('canvas')
+      canvas.width = 800
+      canvas.height = 600
+      overlay.appendChild(canvas)
+      document.body.appendChild(overlay)
+
+      const teardown = (result: string, vars?: Record<string, string | number | boolean>) => {
+        this.state.miniGame?.instance?.destroy()
+        this.state.miniGame = null
+        document.body.removeChild(overlay)
+        if (vars) Object.assign(this.state.variables, vars)
+        this.state.variables['minigame_result'] = result
+        this.loadScene(returnSceneId, undefined, false)
+        this.state.running = true
+        this.lastFrameTime = 0
+        this.renderLoop()
+      }
+
+      const context = {
+        canvas,
+        Phaser: (window as any).Phaser,
+        assets: this.project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
+        variables: { ...this.state.variables },
+        onComplete: (result: 'win' | 'lose' | 'exit', updatedVars?: Record<string, string | number | boolean>) => {
+          teardown(result, updatedVars)
+        },
+      }
+
+      const instance = mod.launch(context)
+      if (this.state.miniGame) this.state.miniGame.instance = instance
+    } catch (err) {
+      console.error('Mini-game error:', err)
+      this.state.miniGame = null
+      this.state.running = true
+      this.lastFrameTime = 0
+      this.renderLoop()
     }
   }
 
