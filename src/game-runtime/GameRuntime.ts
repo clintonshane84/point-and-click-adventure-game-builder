@@ -381,14 +381,14 @@ export class GameRuntime {
     if (!char || !mc) return
     if (!scene.exits || scene.exits.length === 0) return
 
-    const fx = char.x + mc.width / 2
-    const fy = char.y + mc.height
-
+    // Use the character's actual edges, not the foot centre.
+    // Pathfinding routes the hero to grid-cell centres, so the foot centre
+    // never reaches scene.width / 0 — but the character's leading edge does.
     let crossedSide: SceneExitSide | null = null
-    if (fx <= 0) crossedSide = 'left'
-    else if (fx >= scene.width) crossedSide = 'right'
-    else if (fy <= 0) crossedSide = 'top'
-    else if (fy >= scene.height) crossedSide = 'bottom'
+    if (char.x <= 0) crossedSide = 'left'
+    else if (char.x + mc.width >= scene.width) crossedSide = 'right'
+    else if (char.y <= 0) crossedSide = 'top'
+    else if (char.y + mc.height >= scene.height) crossedSide = 'bottom'
 
     if (!crossedSide) return
 

@@ -266,12 +266,11 @@ export class GameEngine {
     const char=this.state.character,mc=this.project.mainCharacter;
     if(!char||!mc) return;
     if(!scene.exits||scene.exits.length===0) return;
-    const fx=char.x+mc.width/2, fy=char.y+mc.height;
     let side=null;
-    if(fx<=0) side='left';
-    else if(fx>=scene.width) side='right';
-    else if(fy<=0) side='top';
-    else if(fy>=scene.height) side='bottom';
+    if(char.x<=0) side='left';
+    else if(char.x+mc.width>=scene.width) side='right';
+    else if(char.y<=0) side='top';
+    else if(char.y+mc.height>=scene.height) side='bottom';
     if(!side) return;
     const exitDef=scene.exits.find(e=>e.side===side);
     if(!exitDef) return;
