@@ -4,12 +4,12 @@ import type Konva from 'konva'
 import {
   Plus, Trash2, MousePointer, ChevronDown,
   ImageIcon, X, ZoomIn, ZoomOut,
-  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles, Shrink, Layers,
+  User, Box, Crosshair, Image, LayoutTemplate, ShieldOff, Sparkles, Shrink, Layers, ArrowLeftRight,
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
 import { useAiStore } from '../../store/useAiStore'
 import { AiGenerateModal } from '../../components/AiGenerateModal'
-import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, Asset, NpcCharacter, NpcMovementInstruction, SceneExitSide } from '../../types'
+import type { SceneObject, SceneObjectType, FacingDirection, BlockedZone, ScaleZone, TeleportZone, Asset, NpcCharacter, NpcMovementInstruction, SceneExitSide } from '../../types'
 
 // ─── Image loader hook ────────────────────────────────────────────────────────
 
@@ -78,6 +78,7 @@ export function SceneEditor() {
     updateSceneCharacterPlacement,
     addBlockedZone, deleteBlockedZone,
     addScaleZone, updateScaleZone, deleteScaleZone,
+    addTeleportZone, updateTeleportZone, deleteTeleportZone,
     addAsset,
   } = useGameStore()
   const { settings: aiSettings } = useAiStore()
@@ -134,6 +135,12 @@ export function SceneEditor() {
   const [drawingScaleZone, setDrawingScaleZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
   const isDrawingScaleRef = useRef(false)
 
+  // Teleport zone editing mode
+  const [teleportMode, setTeleportMode] = useState(false)
+  const [selectedTeleportZoneId, setSelectedTeleportZoneId] = useState<string | null>(null)
+  const [drawingTeleportZone, setDrawingTeleportZone] = useState<{ startX: number; startY: number; w: number; h: number } | null>(null)
+  const isDrawingTeleportRef = useRef(false)
+
   const selectedObj = activeScene?.objects.find((o) => o.id === selectedObjId) ?? null
   const bgImage = useHtmlImage(activeScene?.backgroundImageUrl)
   const imageAssets = assets.filter((a) => a.type === 'image')
@@ -165,7 +172,12 @@ export function SceneEditor() {
         setSelectedScaleZoneId(null)
         return
       }
-      if (!pathMode && !scaleMode && selectedObjId) {
+      if (teleportMode && selectedTeleportZoneId) {
+        deleteTeleportZone(activeScene.id, selectedTeleportZoneId)
+        setSelectedTeleportZoneId(null)
+        return
+      }
+      if (!pathMode && !scaleMode && !teleportMode && selectedObjId) {
         deleteSceneObject(activeScene.id, selectedObjId)
         setSelectedObjId(null)
         transformerRef.current?.nodes([])
@@ -173,7 +185,7 @@ export function SceneEditor() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedObjId, selectedZoneId, selectedScaleZoneId, pathMode, scaleMode, activeScene, deleteSceneObject, deleteBlockedZone, deleteScaleZone])
+  }, [selectedObjId, selectedZoneId, selectedScaleZoneId, selectedTeleportZoneId, pathMode, scaleMode, teleportMode, activeScene, deleteSceneObject, deleteBlockedZone, deleteScaleZone, deleteTeleportZone])
 
   // ── Scroll-wheel zoom (Ctrl/Cmd + scroll) ──────────────────────────────────
   useEffect(() => {
@@ -247,6 +259,10 @@ export function SceneEditor() {
       if (e.target === e.target.getStage()) setSelectedScaleZoneId(null)
       return
     }
+    if (teleportMode) {
+      if (e.target === e.target.getStage()) setSelectedTeleportZoneId(null)
+      return
+    }
     if (e.target === e.target.getStage()) {
       setSelectedObjId(null)
       transformerRef.current?.nodes([])
@@ -263,7 +279,7 @@ export function SceneEditor() {
   }, [activeScene, zoom])
 
   const handleStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
-    if ((!pathMode && !scaleMode) || !activeScene) return
+    if ((!pathMode && !scaleMode && !teleportMode) || !activeScene) return
     if (e.target !== e.target.getStage()) return
     const pos = stageToScene()
     if (!pos) return
@@ -271,12 +287,16 @@ export function SceneEditor() {
       isDrawingRef.current = true
       setDrawingZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
       setSelectedZoneId(null)
-    } else {
+    } else if (scaleMode) {
       isDrawingScaleRef.current = true
       setDrawingScaleZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
       setSelectedScaleZoneId(null)
+    } else {
+      isDrawingTeleportRef.current = true
+      setDrawingTeleportZone({ startX: pos.x, startY: pos.y, w: 0, h: 0 })
+      setSelectedTeleportZoneId(null)
     }
-  }, [pathMode, scaleMode, activeScene, stageToScene])
+  }, [pathMode, scaleMode, teleportMode, activeScene, stageToScene])
 
   const handleStageMouseMove = useCallback((_e: Konva.KonvaEventObject<MouseEvent>) => {
     const pos = stageToScene()
@@ -285,8 +305,10 @@ export function SceneEditor() {
       setDrawingZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
     } else if (scaleMode && isDrawingScaleRef.current) {
       setDrawingScaleZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
+    } else if (teleportMode && isDrawingTeleportRef.current) {
+      setDrawingTeleportZone((prev) => prev ? { ...prev, w: pos.x - prev.startX, h: pos.y - prev.startY } : null)
     }
-  }, [pathMode, scaleMode, stageToScene])
+  }, [pathMode, scaleMode, teleportMode, stageToScene])
 
   const handleStageMouseUp = useCallback(() => {
     if (pathMode && isDrawingRef.current && drawingZone && activeScene) {
@@ -323,7 +345,23 @@ export function SceneEditor() {
       }
       setDrawingScaleZone(null)
     }
-  }, [pathMode, scaleMode, drawingZone, drawingScaleZone, activeScene, addBlockedZone, addScaleZone])
+    if (teleportMode && isDrawingTeleportRef.current && drawingTeleportZone && activeScene) {
+      isDrawingTeleportRef.current = false
+      const w = Math.abs(drawingTeleportZone.w), h = Math.abs(drawingTeleportZone.h)
+      if (w > 10 && h > 10) {
+        const x = drawingTeleportZone.w < 0 ? drawingTeleportZone.startX + drawingTeleportZone.w : drawingTeleportZone.startX
+        const y = drawingTeleportZone.h < 0 ? drawingTeleportZone.startY + drawingTeleportZone.h : drawingTeleportZone.startY
+        const zone: TeleportZone = {
+          id: `tzn-${Date.now()}`,
+          label: `Teleport ${(activeScene.teleportZones?.length ?? 0) + 1}`,
+          x, y, width: w, height: h,
+        }
+        addTeleportZone(activeScene.id, zone)
+        setSelectedTeleportZoneId(zone.id)
+      }
+      setDrawingTeleportZone(null)
+    }
+  }, [pathMode, scaleMode, teleportMode, drawingZone, drawingScaleZone, drawingTeleportZone, activeScene, addBlockedZone, addScaleZone, addTeleportZone])
 
   const handleObjectClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>, objId: string) => {
@@ -627,6 +665,33 @@ export function SceneEditor() {
             </button>
           )}
 
+          {/* Teleport zone mode toggle */}
+          <button
+            onClick={() => {
+              const next = !teleportMode
+              setTeleportMode(next)
+              if (next) { setPathMode(false); setScaleMode(false) }
+              setSelectedObjId(null); setSelectedZoneId(null); setSelectedScaleZoneId(null); setSelectedTeleportZoneId(null)
+              setDrawingZone(null); setDrawingScaleZone(null); setDrawingTeleportZone(null)
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+              teleportMode ? 'bg-violet-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+            title="Toggle teleport zones editor"
+          >
+            <ArrowLeftRight size={14} />
+            {teleportMode ? 'Teleport (ON)' : 'Teleport'}
+          </button>
+
+          {teleportMode && selectedTeleportZoneId && (
+            <button
+              onClick={() => { if (activeScene) deleteTeleportZone(activeScene.id, selectedTeleportZoneId); setSelectedTeleportZoneId(null) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm bg-violet-700 hover:bg-violet-600 text-white"
+            >
+              <Trash2 size={14} /> Delete Teleport Zone
+            </button>
+          )}
+
           {pathMode && (
             <span className="text-xs text-red-400 bg-red-900/20 px-2 py-1 rounded border border-red-700/30">
               Click &amp; drag to draw blocked zones · Click zone to select · Del to remove
@@ -636,6 +701,12 @@ export function SceneEditor() {
           {scaleMode && (
             <span className="text-xs text-teal-400 bg-teal-900/20 px-2 py-1 rounded border border-teal-700/30">
               Click &amp; drag to draw scale zones · Click zone to set shrink &amp; speed · Del to remove
+            </span>
+          )}
+
+          {teleportMode && (
+            <span className="text-xs text-violet-400 bg-violet-900/20 px-2 py-1 rounded border border-violet-700/30">
+              Click &amp; drag to draw teleport zones · Click zone to link it · Del to remove
             </span>
           )}
 
@@ -677,9 +748,10 @@ export function SceneEditor() {
 
           <span className="text-xs text-gray-600 pl-2 border-l border-gray-700">
             {activeScene?.name} — {activeScene?.width}×{activeScene?.height}
-            {!pathMode && !scaleMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
+            {!pathMode && !scaleMode && !teleportMode && selectedObjId && <span className="ml-2 text-indigo-400">1 selected · Del to remove</span>}
             {pathMode && <span className="ml-2 text-red-400">{activeScene?.blockedZones?.length ?? 0} blocked zone{(activeScene?.blockedZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
             {scaleMode && <span className="ml-2 text-teal-400">{activeScene?.scaleZones?.length ?? 0} scale zone{(activeScene?.scaleZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
+            {teleportMode && <span className="ml-2 text-violet-400">{activeScene?.teleportZones?.length ?? 0} teleport zone{(activeScene?.teleportZones?.length ?? 0) !== 1 ? 's' : ''}</span>}
           </span>
         </div>
 
@@ -703,7 +775,7 @@ export function SceneEditor() {
                 onMouseDown={handleStageMouseDown}
                 onMouseMove={handleStageMouseMove}
                 onMouseUp={handleStageMouseUp}
-                style={{ cursor: pathMode ? 'crosshair' : 'default' }}
+                style={{ cursor: (pathMode || scaleMode || teleportMode) ? 'crosshair' : 'default' }}
               >
                 <Layer>
                   {/* Scene background color */}
@@ -985,6 +1057,59 @@ export function SceneEditor() {
                     )
                   })()}
 
+                  {/* Teleport zones */}
+                  {(activeScene.teleportZones ?? []).map((zone) => {
+                    const isSel = zone.id === selectedTeleportZoneId
+                    const isLinked = !!(zone.linkedSceneId && zone.linkedZoneId)
+                    return (
+                      <Rect
+                        key={zone.id}
+                        x={zone.x} y={zone.y}
+                        width={zone.width} height={zone.height}
+                        fill={isSel ? 'rgba(139,92,246,0.40)' : isLinked ? 'rgba(139,92,246,0.22)' : 'rgba(139,92,246,0.10)'}
+                        stroke={isSel ? '#8b5cf6' : isLinked ? '#a78bfa' : '#7c3aed'}
+                        strokeWidth={isSel ? 2.5 : 1.5}
+                        dash={isSel ? undefined : [6, 3]}
+                        listening={teleportMode}
+                        onClick={teleportMode ? (e) => { e.cancelBubble = true; setSelectedTeleportZoneId(zone.id) } : undefined}
+                      />
+                    )
+                  })}
+
+                  {/* Teleport zone labels */}
+                  {teleportMode && (activeScene.teleportZones ?? []).map((zone) => {
+                    const targetScene = zone.linkedSceneId ? scenes.find((s) => s.id === zone.linkedSceneId) : null
+                    const targetZone = targetScene ? (targetScene.teleportZones ?? []).find((z) => z.id === zone.linkedZoneId) : null
+                    const linkLabel = targetScene && targetZone ? `→ ${targetScene.name}: ${targetZone.label}` : 'unlinked'
+                    return (
+                      <Text
+                        key={`lbl-tz-${zone.id}`}
+                        x={zone.x + 4} y={zone.y + 4}
+                        text={`${zone.label}\n${linkLabel}`}
+                        fontSize={10}
+                        fill="#c4b5fd"
+                        listening={false}
+                      />
+                    )
+                  })}
+
+                  {/* Drawing preview — teleport zone */}
+                  {teleportMode && drawingTeleportZone && (() => {
+                    const x = drawingTeleportZone.w < 0 ? drawingTeleportZone.startX + drawingTeleportZone.w : drawingTeleportZone.startX
+                    const y = drawingTeleportZone.h < 0 ? drawingTeleportZone.startY + drawingTeleportZone.h : drawingTeleportZone.startY
+                    return (
+                      <Rect
+                        x={x} y={y}
+                        width={Math.abs(drawingTeleportZone.w)} height={Math.abs(drawingTeleportZone.h)}
+                        fill="rgba(139,92,246,0.20)"
+                        stroke="#8b5cf6"
+                        strokeWidth={2}
+                        dash={[5, 3]}
+                        listening={false}
+                      />
+                    )
+                  })()}
+
                   <Transformer
                     ref={transformerRef}
                     boundBoxFunc={(oldBox, newBox) =>
@@ -1002,7 +1127,7 @@ export function SceneEditor() {
       <div className="w-56 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-gray-700">
           <span className="text-gray-300 text-sm font-semibold">
-            {pathMode ? 'Blocked Zone' : scaleMode ? 'Scale Zone' : 'Properties'}
+            {pathMode ? 'Blocked Zone' : scaleMode ? 'Scale Zone' : teleportMode ? 'Teleport Zone' : 'Properties'}
           </span>
         </div>
 
@@ -1131,7 +1256,104 @@ export function SceneEditor() {
           )
         })()}
 
-        {selectedObj && activeScene && !pathMode && !scaleMode ? (
+        {/* Teleport mode: show selected teleport zone properties */}
+        {teleportMode && (() => {
+          const zone = (activeScene?.teleportZones ?? []).find((z) => z.id === selectedTeleportZoneId)
+          if (!zone || !activeScene) return (
+            <div className="flex items-center justify-center py-10 px-4">
+              <p className="text-gray-500 text-xs text-center leading-relaxed">
+                Click &amp; drag on the canvas to create a teleport zone.<br />
+                <span className="text-gray-600">Click an existing zone to link it.</span>
+              </p>
+            </div>
+          )
+          const otherScenes = scenes.filter((s) => s.id !== activeScene.id)
+          const targetSceneZones = zone.linkedSceneId
+            ? (scenes.find((s) => s.id === zone.linkedSceneId)?.teleportZones ?? [])
+            : []
+          return (
+            <div className="p-3 space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Label</label>
+                <input
+                  type="text"
+                  value={zone.label}
+                  onChange={(e) => updateTeleportZone(activeScene.id, zone.id, { label: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-violet-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(['x', 'y', 'width', 'height'] as const).map((prop) => (
+                  <div key={prop}>
+                    <label className="text-xs text-gray-400 block mb-1 uppercase">{prop === 'width' ? 'W' : prop === 'height' ? 'H' : prop.toUpperCase()}</label>
+                    <input
+                      type="number"
+                      value={Math.round(zone[prop])}
+                      onChange={(e) => updateTeleportZone(activeScene.id, zone.id, { [prop]: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Target Scene</label>
+                <select
+                  value={zone.linkedSceneId ?? ''}
+                  onChange={(e) => updateTeleportZone(activeScene.id, zone.id, { linkedSceneId: e.target.value || undefined, linkedZoneId: undefined })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-violet-500"
+                >
+                  <option value="">— none —</option>
+                  {otherScenes.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              {zone.linkedSceneId && (
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Target Zone</label>
+                  <select
+                    value={zone.linkedZoneId ?? ''}
+                    onChange={(e) => updateTeleportZone(activeScene.id, zone.id, { linkedZoneId: e.target.value || undefined })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-violet-500"
+                  >
+                    <option value="">— none —</option>
+                    {targetSceneZones.map((z) => (
+                      <option key={z.id} value={z.id}>{z.label}</option>
+                    ))}
+                    {targetSceneZones.length === 0 && (
+                      <option disabled value="">No teleport zones in that scene yet</option>
+                    )}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Arrival Facing</label>
+                <select
+                  value={zone.entryFacing ?? ''}
+                  onChange={(e) => updateTeleportZone(activeScene.id, zone.id, { entryFacing: e.target.value ? e.target.value as FacingDirection : undefined })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-violet-500"
+                >
+                  <option value="">— keep current —</option>
+                  <option value="down">↓ down</option>
+                  <option value="up">↑ up</option>
+                  <option value="left">← left</option>
+                  <option value="right">→ right</option>
+                </select>
+              </div>
+              <button
+                onClick={() => { deleteTeleportZone(activeScene.id, zone.id); setSelectedTeleportZoneId(null) }}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm bg-violet-800 hover:bg-violet-700 text-white mt-2"
+              >
+                <Trash2 size={13} /> Delete Zone
+              </button>
+              <p className="text-xs text-violet-400/70 bg-violet-900/10 rounded p-2">
+                Hero is instantly transported to the centre of the linked zone when they step inside this one.
+              </p>
+            </div>
+          )
+        })()}
+
+        {selectedObj && activeScene && !pathMode && !scaleMode && !teleportMode ? (
           <div className="p-3 space-y-3">
 
             {/* Name */}

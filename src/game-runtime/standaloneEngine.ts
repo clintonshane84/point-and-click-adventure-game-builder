@@ -117,6 +117,7 @@ export class GameEngine {
       dialogCallback: null,
       character: null,
       activeHotspots: new Set(),
+      activeTeleportZones: new Set(),
       cinematic: null,
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
@@ -156,6 +157,7 @@ export class GameEngine {
   _loadScene(sceneId, entryOverride, stageStart=false) {
     this.state.currentSceneId = sceneId;
     this.state.activeHotspots = new Set();
+    this.state.activeTeleportZones = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
@@ -198,6 +200,13 @@ export class GameEngine {
           if(sfx>=obj.x&&sfx<=obj.x+obj.width&&sfy>=obj.y&&sfy<=obj.y+obj.height) this.state.activeHotspots.add(obj.id);
         }
       }
+      // Pre-seed activeTeleportZones so spawn-position teleport zones don't fire immediately
+      if(this.state.character&&mc){
+        const sfx=this.state.character.x+mc.width/2,sfy=this.state.character.y+mc.height;
+        for(const zone of (scene.teleportZones||[])){
+          if(sfx>=zone.x&&sfx<=zone.x+zone.width&&sfy>=zone.y&&sfy<=zone.y+zone.height) this.state.activeTeleportZones.add(zone.id);
+        }
+      }
       // Initialize NPC movement states
       const npcStateMap=new Map();
       (scene.objects||[]).filter(o=>o.type==='character'&&o.npcId&&o.movementInstruction&&o.movementInstruction!=='none').forEach(o=>{
@@ -220,7 +229,7 @@ export class GameEngine {
     if(!this.state.showTitleScreen){
       this._updateCharacter(dt);
       const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._updateNpcs(dt,scene);}
+      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
       if(this.state.cinematic) this._updateCinematic(dt);
     }
     this._render();
@@ -262,6 +271,31 @@ export class GameEngine {
     char.targetScale=ts; char.targetSpeedMult=tm;
   }
 
+  _checkTeleportZones(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const fx=char.x+mc.width/2,fy=char.y+mc.height;
+    for(const zone of (scene.teleportZones||[])){
+      const inside=fx>=zone.x&&fx<=zone.x+zone.width&&fy>=zone.y&&fy<=zone.y+zone.height;
+      const wasInside=this.state.activeTeleportZones.has(zone.id);
+      if(inside&&!wasInside){
+        this.state.activeTeleportZones.add(zone.id);
+        if(zone.linkedSceneId&&zone.linkedZoneId){
+          const tScene=this.project.scenes.find(s=>s.id===zone.linkedSceneId);
+          const tZone=tScene?(tScene.teleportZones||[]).find(z=>z.id===zone.linkedZoneId):null;
+          if(tScene&&tZone){
+            const ax=Math.max(0,Math.min(tScene.width-mc.width,tZone.x+tZone.width/2-mc.width/2));
+            const ay=Math.max(0,Math.min(tScene.height-mc.height,tZone.y+tZone.height/2-mc.height/2));
+            const facing=zone.entryFacing||char.facing;
+            this._loadScene(tScene.id,{x:ax,y:ay,facing});
+            return;
+          }
+        }
+      } else if(!inside&&wasInside){
+        this.state.activeTeleportZones.delete(zone.id);
+      }
+    }
+  }
   _findSafeArrival(scene,mc,nomX,nomY,side) {
     const padX=Math.max(0,mc.width/2-1),padY=Math.max(0,mc.height/2-1);
     const zones=scene.blockedZones||[];

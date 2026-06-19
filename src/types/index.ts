@@ -68,6 +68,18 @@ export interface ScaleZone {
   speedMultiplier: number // walk speed multiplier inside zone (0.1–1.0)
 }
 
+export interface TeleportZone {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  linkedSceneId?: string
+  linkedZoneId?: string
+  entryFacing?: FacingDirection
+}
+
 export type SceneExitSide = 'left' | 'right' | 'top' | 'bottom'
 
 export interface SceneExit {
@@ -129,6 +141,7 @@ export interface Scene {
   characterPlacement?: CharacterPlacement
   blockedZones?: BlockedZone[]
   scaleZones?: ScaleZone[]
+  teleportZones?: TeleportZone[]
   exits?: SceneExit[]
 }
 

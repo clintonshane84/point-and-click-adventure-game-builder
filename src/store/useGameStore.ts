@@ -27,6 +27,7 @@ import type {
   CharacterPlacement,
   BlockedZone,
   ScaleZone,
+  TeleportZone,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -209,6 +210,11 @@ interface GameStore {
   addScaleZone: (sceneId: string, zone: ScaleZone) => void
   updateScaleZone: (sceneId: string, zoneId: string, updates: Partial<ScaleZone>) => void
   deleteScaleZone: (sceneId: string, zoneId: string) => void
+
+  // Teleport zone actions
+  addTeleportZone: (sceneId: string, zone: TeleportZone) => void
+  updateTeleportZone: (sceneId: string, zoneId: string, updates: Partial<TeleportZone>) => void
+  deleteTeleportZone: (sceneId: string, zoneId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -225,6 +231,7 @@ export const useGameStore = create<GameStore>((set) => ({
           ...s,
           blockedZones: s.blockedZones ?? [],
           scaleZones: s.scaleZones ?? [],
+          teleportZones: s.teleportZones ?? [],
         })),
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
         npcs: project.npcs ?? [],
@@ -778,6 +785,51 @@ export const useGameStore = create<GameStore>((set) => ({
         scenes: state.project.scenes.map((s) =>
           s.id === sceneId
             ? { ...s, scaleZones: (s.scaleZones ?? []).filter((z) => z.id !== zoneId) }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Teleport zone actions
+  addTeleportZone: (sceneId, zone) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, teleportZones: [...(s.teleportZones ?? []), zone] }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateTeleportZone: (sceneId, zoneId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? {
+                ...s,
+                teleportZones: (s.teleportZones ?? []).map((z) =>
+                  z.id === zoneId ? { ...z, ...updates } : z
+                ),
+              }
+            : s
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteTeleportZone: (sceneId, zoneId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((s) =>
+          s.id === sceneId
+            ? { ...s, teleportZones: (s.teleportZones ?? []).filter((z) => z.id !== zoneId) }
             : s
         ),
         updatedAt: new Date().toISOString(),

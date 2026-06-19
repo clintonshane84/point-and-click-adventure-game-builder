@@ -65,6 +65,7 @@ interface GameState {
   dialogCallback: (() => void) | null
   character: CharacterState | null
   activeHotspots: Set<string>
+  activeTeleportZones: Set<string>
   cinematic: CinematicPlayState | null
   npcStates: Map<string, NpcRuntimeState>
   showTitleScreen: boolean
@@ -108,6 +109,7 @@ export class GameRuntime {
       dialogCallback: null,
       character: null,
       activeHotspots: new Set(),
+      activeTeleportZones: new Set(),
       cinematic: null,
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
@@ -152,6 +154,7 @@ export class GameRuntime {
   private loadScene(sceneId: string, entryOverride?: { x: number; y: number; facing?: FacingDirection }, stageStart = false) {
     this.state.currentSceneId = sceneId
     this.state.activeHotspots = new Set()
+    this.state.activeTeleportZones = new Set()
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
@@ -250,6 +253,18 @@ export class GameRuntime {
         }
       }
 
+      // Pre-seed activeTeleportZones with any teleport zones the hero spawns inside.
+      if (this.state.character && mc2) {
+        const spawnFx = this.state.character.x + mc2.width / 2
+        const spawnFy = this.state.character.y + mc2.height
+        for (const zone of (scene.teleportZones ?? [])) {
+          if (spawnFx >= zone.x && spawnFx <= zone.x + zone.width &&
+              spawnFy >= zone.y && spawnFy <= zone.y + zone.height) {
+            this.state.activeTeleportZones.add(zone.id)
+          }
+        }
+      }
+
       // Initialize NPC movement states for character objects with movement instructions
       const npcStateMap = new Map<string, NpcRuntimeState>()
       scene.objects
@@ -295,6 +310,7 @@ export class GameRuntime {
         this.checkHotspots(scene)
         this.checkScaleZones(scene)
         this.checkSceneEdges(scene)
+        this.checkTeleportZones(scene)
       }
       if (this.state.cinematic) this.updateCinematic(dt)
     }
@@ -371,6 +387,43 @@ export class GameRuntime {
 
     char.targetScale = targetScale
     char.targetSpeedMult = targetSpeedMult
+  }
+
+  // ── Teleport zone detection ───────────────────────────────────────────────
+
+  private checkTeleportZones(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    for (const zone of (scene.teleportZones ?? [])) {
+      const inside =
+        fx >= zone.x && fx <= zone.x + zone.width &&
+        fy >= zone.y && fy <= zone.y + zone.height
+      const wasInside = this.state.activeTeleportZones.has(zone.id)
+
+      if (inside && !wasInside) {
+        this.state.activeTeleportZones.add(zone.id)
+        if (zone.linkedSceneId && zone.linkedZoneId) {
+          const targetScene = this.project.scenes.find((s) => s.id === zone.linkedSceneId)
+          const targetZone = targetScene ? (targetScene.teleportZones ?? []).find((z) => z.id === zone.linkedZoneId) : null
+          if (targetScene && targetZone) {
+            const arrX = Math.max(0, Math.min(targetScene.width - mc.width,
+              targetZone.x + targetZone.width / 2 - mc.width / 2))
+            const arrY = Math.max(0, Math.min(targetScene.height - mc.height,
+              targetZone.y + targetZone.height / 2 - mc.height / 2))
+            const facing = zone.entryFacing ?? char.facing
+            this.loadScene(targetScene.id, { x: arrX, y: arrY, facing })
+            return
+          }
+        }
+      } else if (!inside && wasInside) {
+        this.state.activeTeleportZones.delete(zone.id)
+      }
+    }
   }
 
   // ── Scene edge detection ─────────────────────────────────────────────────
