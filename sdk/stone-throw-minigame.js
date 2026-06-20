@@ -228,9 +228,8 @@ const StoneThrow = {
 
       // Rocks
       g.fillStyle(0x9e8b6b, 1)
-      [[W*0.05,H*0.76,22,12],[W*0.88,H*0.80,16,9],[W*0.62,H*0.73,12,7]].forEach(
-        ([rx,ry,rw,rh]) => g.fillEllipse(rx,ry,rw,rh)
-      )
+      const rocks = [[W*0.05,H*0.76,22,12],[W*0.88,H*0.80,16,9],[W*0.62,H*0.73,12,7]]
+      rocks.forEach(([rx,ry,rw,rh]) => g.fillEllipse(rx,ry,rw,rh))
     }
 
     // ── Goliath silhouette ───────────────────────────────────────────────────
