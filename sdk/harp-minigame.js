@@ -183,6 +183,7 @@ const HarpGame = {
 
       // Move active notes downward
       for (let i = activeNotes.length - 1; i >= 0; i--) {
+        if (gameState !== 'PLAYING') break   // endGame may have been triggered
         const n = activeNotes[i]
         if (n.destroyed) { activeNotes.splice(i, 1); continue }
         n.gfx.y += NOTE_SPEED * (delta / 1000)
@@ -191,6 +192,7 @@ const HarpGame = {
         if (n.gfx.y > HIT_LINE_Y + MISS_WINDOW) {
           missNote(this, n)
           activeNotes.splice(i, 1)
+          if (gameState !== 'PLAYING') break // missNote may have called endGame
         }
       }
 
