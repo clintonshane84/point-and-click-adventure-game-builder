@@ -1,7 +1,7 @@
 import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
-  CinematicCompletionAction,
+  CinematicCompletionAction, NpcMovementInstruction, SceneExitSide,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -19,6 +19,20 @@ interface CharacterState {
   targetScale: number
   speedMult: number   // current speed multiplier (lerps toward targetSpeedMult)
   targetSpeedMult: number
+}
+
+interface NpcRuntimeState {
+  x: number
+  y: number
+  facing: FacingDirection
+  animFrame: number
+  animTimer: number     // ms since last anim frame advance
+  waypoints: PathPoint[]
+  waypointIndex: number
+  behaviorTimer: number  // ms countdown before next behavior decision
+  behaviorPhase: 'idle' | 'moving'
+  attackFired: boolean
+  scale: number          // current visual scale driven by scale zones (default 1)
 }
 
 type CinematicMode =
@@ -51,7 +65,11 @@ interface GameState {
   dialogCallback: (() => void) | null
   character: CharacterState | null
   activeHotspots: Set<string>
+  activeTeleportZones: Set<string>
   cinematic: CinematicPlayState | null
+  miniGame: { returnSceneId: string; instance: { destroy(): void } | null } | null
+  npcStates: Map<string, NpcRuntimeState>
+  showTitleScreen: boolean
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -67,6 +85,7 @@ export class GameRuntime {
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
   private boundMouseMove: (e: MouseEvent) => void
+  private titleScreenButtonRects: { id: string; action: string; x: number; y: number; w: number; h: number }[] = []
 
   constructor(canvas: HTMLCanvasElement, project: GameProject) {
     this.canvas = canvas
@@ -80,6 +99,8 @@ export class GameRuntime {
   }
 
   private freshState(): GameState {
+    const ts = this.project.titleScreen
+    const hasTitleScreen = !!(ts?.titleText || (ts?.buttons && ts.buttons.length > 0))
     return {
       currentSceneId: this.project.settings.startingSceneId || this.project.scenes[0]?.id || '',
       variables: {},
@@ -89,7 +110,11 @@ export class GameRuntime {
       dialogCallback: null,
       character: null,
       activeHotspots: new Set(),
+      activeTeleportZones: new Set(),
       cinematic: null,
+      npcStates: new Map(),
+      showTitleScreen: hasTitleScreen,
+      miniGame: null,
     }
   }
 
@@ -99,7 +124,12 @@ export class GameRuntime {
     this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
-    this.loadScene(this.state.currentSceneId)
+    if (this.state.showTitleScreen) {
+      const ts = this.project.titleScreen
+      if (ts?.backgroundImageUrl) this.loadImage(ts.backgroundImageUrl)
+    } else {
+      this.loadScene(this.state.currentSceneId, undefined, true)
+    }
     this.renderLoop()
   }
 
@@ -123,9 +153,10 @@ export class GameRuntime {
 
   // ── Scene loading ─────────────────────────────────────────────────────────
 
-  private loadScene(sceneId: string) {
+  private loadScene(sceneId: string, entryOverride?: { x: number; y: number; facing?: FacingDirection }, stageStart = false) {
     this.state.currentSceneId = sceneId
     this.state.activeHotspots = new Set()
+    this.state.activeTeleportZones = new Set()
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
@@ -161,13 +192,14 @@ export class GameRuntime {
         }
       }
 
-      // Initialize character position from scene placement
-      const cp = scene.characterPlacement
-      if (cp?.visible && mc) {
-        const facing = cp.facing ?? mc.defaultFacing ?? 'down'
+      // Resolve character spawn:
+      //   entryOverride (navigate_scene arrival) → characterPlacement (stage start only) → null
+      const mc2 = this.project.mainCharacter
+      if (entryOverride && mc2) {
+        const facing = entryOverride.facing ?? mc2.defaultFacing ?? 'down'
         this.state.character = {
-          x: cp.x,
-          y: cp.y,
+          x: entryOverride.x,
+          y: entryOverride.y,
           waypoints: [],
           waypointIndex: 0,
           facing,
@@ -179,9 +211,83 @@ export class GameRuntime {
           speedMult: 1,
           targetSpeedMult: 1,
         }
+      } else if (stageStart) {
+        // characterPlacement is only honoured on the first scene of a stage
+        const cp = scene.characterPlacement
+        if (cp?.visible && mc2) {
+          const facing = cp.facing ?? mc2.defaultFacing ?? 'down'
+          this.state.character = {
+            x: cp.x,
+            y: cp.y,
+            waypoints: [],
+            waypointIndex: 0,
+            facing,
+            moving: false,
+            animFrame: this.getAnimStartFrame(facing),
+            animTimer: 0,
+            scale: 1,
+            targetScale: 1,
+            speedMult: 1,
+            targetSpeedMult: 1,
+          }
+        } else {
+          this.state.character = null
+        }
       } else {
+        // Scene transition with no arrival position set: hero does not appear.
+        // Set Arrival Position on the navigate_scene event action to fix this.
         this.state.character = null
       }
+
+      // Pre-seed activeHotspots with any hotspot zones the hero spawns inside.
+      // Without this, checkHotspots fires 'enter' immediately on the next frame
+      // for any hotspot at the spawn position — which would trigger navigate_scene
+      // again and erase the character before the player ever sees them.
+      if (this.state.character && mc2) {
+        const spawnFx = this.state.character.x + mc2.width / 2
+        const spawnFy = this.state.character.y + mc2.height
+        for (const obj of scene.objects) {
+          if (obj.type !== 'hotspot') continue
+          if (spawnFx >= obj.x && spawnFx <= obj.x + obj.width &&
+              spawnFy >= obj.y && spawnFy <= obj.y + obj.height) {
+            this.state.activeHotspots.add(obj.id)
+          }
+        }
+      }
+
+      // Pre-seed activeTeleportZones with any teleport zones the hero spawns inside.
+      if (this.state.character && mc2) {
+        const spawnFx = this.state.character.x + mc2.width / 2
+        const spawnFy = this.state.character.y + mc2.height
+        for (const zone of (scene.teleportZones ?? [])) {
+          if (spawnFx >= zone.x && spawnFx <= zone.x + zone.width &&
+              spawnFy >= zone.y && spawnFy <= zone.y + zone.height) {
+            this.state.activeTeleportZones.add(zone.id)
+          }
+        }
+      }
+
+      // Initialize NPC movement states for character objects with movement instructions
+      const npcStateMap = new Map<string, NpcRuntimeState>()
+      scene.objects
+        .filter((o) => o.type === 'character' && o.npcId && o.movementInstruction && o.movementInstruction !== 'none')
+        .forEach((o) => {
+          const npc = (this.project.npcs ?? []).find((n) => n.id === o.npcId)
+          npcStateMap.set(o.id, {
+            x: o.x,
+            y: o.y,
+            facing: npc?.defaultFacing ?? 'down',
+            animFrame: 0,
+            animTimer: 0,
+            waypoints: [],
+            waypointIndex: 0,
+            behaviorTimer: 0,
+            behaviorPhase: 'idle',
+            attackFired: false,
+            scale: 1,
+          })
+        })
+      this.state.npcStates = npcStateMap
     }
 
     // Fire scene-level 'enter' events — skip hotspot-bound events (those fire via zone detection)
@@ -198,13 +304,18 @@ export class GameRuntime {
     const now = performance.now()
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16
     this.lastFrameTime = now
-    this.updateCharacter(dt)
-    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
-    if (scene) {
-      this.checkHotspots(scene)
-      this.checkScaleZones(scene)
+    if (!this.state.showTitleScreen) {
+      this.updateCharacter(dt)
+      const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
+      if (scene) {
+        this.updateNpcs(dt, scene)
+        this.checkHotspots(scene)
+        this.checkScaleZones(scene)
+        this.checkSceneEdges(scene)
+        this.checkTeleportZones(scene)
+      }
+      if (this.state.cinematic) this.updateCinematic(dt)
     }
-    if (this.state.cinematic) this.updateCinematic(dt)
     this.render()
     this.frameId = requestAnimationFrame(() => this.renderLoop())
   }
@@ -220,7 +331,14 @@ export class GameRuntime {
     const fx = char.x + mc.width / 2
     const fy = char.y + mc.height
 
+    // Capture the scene ID so we can detect mid-loop transitions.
+    // If an enter/exit event triggers navigate_scene, the scene changes and
+    // the remaining objects belong to the old scene — stop immediately to
+    // avoid evaluating old-scene hotspots against the new arrival position.
+    const sceneIdAtEntry = this.state.currentSceneId
+
     for (const obj of scene.objects) {
+      if (this.state.currentSceneId !== sceneIdAtEntry) break
       if (obj.type !== 'hotspot') continue
       const vis = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
@@ -273,6 +391,155 @@ export class GameRuntime {
     char.targetSpeedMult = targetSpeedMult
   }
 
+  // ── Teleport zone detection ───────────────────────────────────────────────
+
+  private checkTeleportZones(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const fx = char.x + mc.width / 2
+    const fy = char.y + mc.height
+
+    for (const zone of (scene.teleportZones ?? [])) {
+      const inside =
+        fx >= zone.x && fx <= zone.x + zone.width &&
+        fy >= zone.y && fy <= zone.y + zone.height
+      const wasInside = this.state.activeTeleportZones.has(zone.id)
+
+      if (inside && !wasInside) {
+        this.state.activeTeleportZones.add(zone.id)
+        if (zone.linkedSceneId && zone.linkedZoneId) {
+          const targetScene = this.project.scenes.find((s) => s.id === zone.linkedSceneId)
+          const targetZone = targetScene ? (targetScene.teleportZones ?? []).find((z) => z.id === zone.linkedZoneId) : null
+          if (targetScene && targetZone) {
+            const arrX = Math.max(0, Math.min(targetScene.width - mc.width,
+              targetZone.x + targetZone.width / 2 - mc.width / 2))
+            const arrY = Math.max(0, Math.min(targetScene.height - mc.height,
+              targetZone.y + targetZone.height / 2 - mc.height / 2))
+            const facing = zone.entryFacing ?? char.facing
+            this.loadScene(targetScene.id, { x: arrX, y: arrY, facing })
+            return
+          }
+        }
+      } else if (!inside && wasInside) {
+        this.state.activeTeleportZones.delete(zone.id)
+      }
+    }
+  }
+
+  // ── Scene edge detection ─────────────────────────────────────────────────
+
+  private findSafeArrival(
+    scene: Scene,
+    mc: { width: number; height: number },
+    nomX: number,
+    nomY: number,
+    side: SceneExitSide,
+  ): { x: number; y: number } {
+    const padX = Math.max(0, mc.width / 2 - 1)
+    const padY = Math.max(0, mc.height / 2 - 1)
+    const zones = scene.blockedZones ?? []
+
+    const overlaps = (x: number, y: number): boolean => {
+      for (const z of zones) {
+        if (
+          x - padX < z.x + z.width &&
+          x + mc.width + padX > z.x &&
+          y - padY < z.y + z.height &&
+          y + mc.height + padY > z.y
+        ) return true
+      }
+      return false
+    }
+
+    if (!overlaps(nomX, nomY)) return { x: nomX, y: nomY }
+
+    const step = 4
+    if (side === 'left' || side === 'right') {
+      const maxScan = scene.height
+      for (let d = step; d <= maxScan; d += step) {
+        for (const cy of [nomY + d, nomY - d]) {
+          const clamped = Math.max(0, Math.min(scene.height - mc.height, cy))
+          if (!overlaps(nomX, clamped)) return { x: nomX, y: clamped }
+        }
+      }
+    } else {
+      const maxScan = scene.width
+      for (let d = step; d <= maxScan; d += step) {
+        for (const cx of [nomX + d, nomX - d]) {
+          const clamped = Math.max(0, Math.min(scene.width - mc.width, cx))
+          if (!overlaps(clamped, nomY)) return { x: clamped, y: nomY }
+        }
+      }
+    }
+
+    return { x: nomX, y: nomY }
+  }
+
+  private checkSceneEdges(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+    if (!scene.exits || scene.exits.length === 0) return
+
+    // Use the character's actual edges, not the foot centre.
+    // Pathfinding routes the hero to grid-cell centres, so the foot centre
+    // never reaches scene.width / 0 — but the character's leading edge does.
+    let crossedSide: SceneExitSide | null = null
+    if (char.x <= 0) crossedSide = 'left'
+    else if (char.x + mc.width >= scene.width) crossedSide = 'right'
+    else if (char.y <= 0) crossedSide = 'top'
+    else if (char.y + mc.height >= scene.height) crossedSide = 'bottom'
+
+    if (!crossedSide) return
+
+    const exitDef = scene.exits.find((e) => e.side === crossedSide)
+    if (!exitDef) return
+
+    const targetScene = this.project.scenes.find((s) => s.id === exitDef.targetSceneId)
+    if (!targetScene) return
+
+    // Guard against mid-frame re-entry
+    const sceneIdAtEntry = this.state.currentSceneId
+
+    let arrivalX: number
+    let arrivalY: number
+    const clampedY = Math.max(0, Math.min(targetScene.height - mc.height, char.y))
+    const clampedX = Math.max(0, Math.min(targetScene.width - mc.width, char.x))
+
+    let nomX: number
+    let nomY: number
+    if (crossedSide === 'right') {
+      nomX = 40
+      nomY = clampedY
+    } else if (crossedSide === 'left') {
+      nomX = targetScene.width - 40 - mc.width
+      nomY = clampedY
+    } else if (crossedSide === 'top') {
+      nomX = clampedX
+      nomY = targetScene.height - 40 - mc.height
+    } else {
+      // bottom
+      nomX = clampedX
+      nomY = 40
+    }
+
+    const safe = this.findSafeArrival(targetScene, mc, nomX, nomY, crossedSide)
+    arrivalX = safe.x
+    arrivalY = safe.y
+
+    const inferredFacing: FacingDirection =
+      crossedSide === 'right' ? 'right' :
+      crossedSide === 'left'  ? 'left'  :
+      crossedSide === 'top'   ? 'up'    : 'down'
+
+    const facing: FacingDirection = exitDef.entryFacing ?? inferredFacing
+
+    if (this.state.currentSceneId !== sceneIdAtEntry) return
+    this.loadScene(targetScene.id, { x: arrivalX, y: arrivalY, facing })
+  }
+
   // ── Cinematic execution ───────────────────────────────────────────────────
 
   private playCinematic(cinematicId: string) {
@@ -280,7 +547,7 @@ export class GameRuntime {
     if (!cinematic || cinematic.steps.length === 0) return
     // Load the cinematic's scene if needed
     if (cinematic.sceneId && cinematic.sceneId !== this.state.currentSceneId) {
-      this.loadScene(cinematic.sceneId)
+      this.loadScene(cinematic.sceneId, undefined, true)
     }
     this.state.cinematic = {
       steps: cinematic.steps,
@@ -316,7 +583,7 @@ export class GameRuntime {
               scene.blockedZones ?? [], scene.width, scene.height,
               char.x + mc.width / 2, char.y + mc.height / 2,
               step.targetX ?? 0, step.targetY ?? 0,
-              mc.width, mc.height,
+              mc.width * char.scale, mc.height * char.scale,
             )
             if (path.length > 0) {
               char.waypoints = path
@@ -406,7 +673,7 @@ export class GameRuntime {
     switch (completionAction) {
       case 'navigate_scene': {
         const scene = this.project.scenes.find((s) => s.id === completionValue || s.name === completionValue)
-        if (scene) this.loadScene(scene.id)
+        if (scene) this.loadScene(scene.id, undefined, true)
         break
       }
       case 'show_dialog': {
@@ -560,13 +827,185 @@ export class GameRuntime {
     }
   }
 
+  // ── NPC autonomous movement ───────────────────────────────────────────────
+
+  private updateNpcs(dt: number, scene: Scene) {
+    const NPC_SPEEDS: Record<NpcMovementInstruction, number> = {
+      'none': 0,
+      'roam-slow-and-eat-grass': 50,
+      'roam-human-in-field': 120,
+      'follow-hero': 150,
+      'follow-and-attack-hero': 180,
+    }
+
+    for (const obj of scene.objects) {
+      if (obj.type !== 'character' || !obj.npcId) continue
+      const instr = obj.movementInstruction ?? 'none'
+      if (instr === 'none') continue
+
+      const ns = this.state.npcStates.get(obj.id)
+      if (!ns) continue
+
+      const npc = (this.project.npcs ?? []).find((n) => n.id === obj.npcId)
+      if (!npc) continue
+
+      const speed = NPC_SPEEDS[instr]
+
+      // Compute NPC's current scale from scale zones (mirrors checkScaleZones for main char)
+      const npcFeetX = ns.x + obj.width / 2
+      const npcFeetY = ns.y + obj.height
+      let npcScale = 1
+      for (const zone of (scene.scaleZones ?? [])) {
+        if (npcFeetX >= zone.x && npcFeetX <= zone.x + zone.width &&
+            npcFeetY >= zone.y && npcFeetY <= zone.y + zone.height) {
+          npcScale = zone.scale
+          break
+        }
+      }
+      ns.scale = npcScale
+      const scaledNpcW = npc.width * npcScale
+      const scaledNpcH = npc.height * npcScale
+
+      // ── Behavior decisions ────────────────────────────────────────────────────
+      ns.behaviorTimer = Math.max(0, ns.behaviorTimer - dt)
+
+      if (ns.behaviorPhase === 'idle' && ns.behaviorTimer <= 0) {
+        // Decide next movement based on instruction
+        if (instr === 'roam-slow-and-eat-grass') {
+          const angle = Math.random() * Math.PI * 2
+          const dist = 80 + Math.random() * 120
+          const tx = Math.max(0, Math.min(scene.width - obj.width, ns.x + Math.cos(angle) * dist))
+          const ty = Math.max(0, Math.min(scene.height - obj.height, ns.y + Math.sin(angle) * dist))
+          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, scaledNpcW, scaledNpcH)
+          ns.waypointIndex = 0
+          ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
+          if (ns.behaviorPhase === 'idle') ns.behaviorTimer = 2000 + Math.random() * 4000
+        } else if (instr === 'roam-human-in-field') {
+          const tx = Math.random() * (scene.width - obj.width)
+          const ty = Math.random() * (scene.height - obj.height)
+          ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, tx + obj.width / 2, ty + obj.height, scaledNpcW, scaledNpcH)
+          ns.waypointIndex = 0
+          ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
+          if (ns.behaviorPhase === 'idle') ns.behaviorTimer = 1000 + Math.random() * 2000
+        } else if (instr === 'follow-hero' || instr === 'follow-and-attack-hero') {
+          const char = this.state.character
+          const mc = this.project.mainCharacter
+          if (char && mc) {
+            const stopGap = instr === 'follow-and-attack-hero' ? 40 : 80
+            const heroFeetX = char.x + mc.width / 2
+            const heroFeetY = char.y + mc.height
+            const dx = ns.x - char.x
+            const dy = ns.y - char.y
+            const dist = Math.sqrt(dx * dx + dy * dy)
+            if (dist > stopGap) {
+              ns.waypoints = findPath(scene.blockedZones ?? [], scene.width, scene.height, ns.x + obj.width / 2, ns.y + obj.height, heroFeetX, heroFeetY, scaledNpcW, scaledNpcH)
+              ns.waypointIndex = 0
+              ns.behaviorPhase = ns.waypoints.length > 0 ? 'moving' : 'idle'
+            } else {
+              // Close enough — check for attack
+              if (instr === 'follow-and-attack-hero' && !ns.attackFired) {
+                ns.attackFired = true
+                const objName = npc.name || 'NPC'
+                this.state.variables[`npc_attacked_${obj.id}`] = true
+                if (!this.state.dialogText) {
+                  this.state.dialogText = `${objName} attacks you!`
+                  this.state.dialogCallback = null
+                }
+              }
+              ns.behaviorTimer = 2000
+            }
+          } else {
+            ns.behaviorTimer = 2000
+          }
+        }
+      }
+
+      // ── Movement along waypoints ──────────────────────────────────────────────
+      if (ns.behaviorPhase === 'moving') {
+        const target = ns.waypoints[ns.waypointIndex]
+        if (!target) {
+          ns.behaviorPhase = 'idle'
+          if (instr === 'roam-slow-and-eat-grass') {
+            ns.behaviorTimer = 3000 + Math.random() * 5000
+          } else if (instr === 'roam-human-in-field') {
+            ns.behaviorTimer = 1000 + Math.random() * 2000
+          } else {
+            ns.behaviorTimer = 1500 + Math.random() * 1000
+          }
+        } else {
+          const tx = target.x - obj.width / 2
+          const ty = target.y - obj.height
+          const dx = tx - ns.x
+          const dy = ty - ns.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+
+          if (dist < 3) {
+            ns.x = tx
+            ns.y = ty
+            ns.waypointIndex++
+          } else {
+            if (Math.abs(dx) >= Math.abs(dy)) {
+              ns.facing = dx > 0 ? 'right' : 'left'
+            } else {
+              ns.facing = dy > 0 ? 'down' : 'up'
+            }
+            const step = speed * (dt / 1000)
+            const ratio = Math.min(step / dist, 1)
+            ns.x += dx * ratio
+            ns.y += dy * ratio
+
+            // Advance animation
+            const animCfg = npc.animations[ns.facing]
+            if (animCfg?.spriteSheetId) {
+              const sheet = this.project.spriteSheets?.find((s) => s.id === animCfg.spriteSheetId)
+              const animDef = sheet?.animations.find((a) => a.id === animCfg.animationId)
+              if (animDef && animDef.fps > 0) {
+                const frameMs = 1000 / animDef.fps
+                ns.animTimer += dt
+                while (ns.animTimer >= frameMs) {
+                  ns.animTimer -= frameMs
+                  ns.animFrame++
+                  if (ns.animFrame > animDef.endFrame) ns.animFrame = animDef.startFrame
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Re-check follow distance for attack trigger even while moving
+      if ((instr === 'follow-hero' || instr === 'follow-and-attack-hero') && !ns.attackFired && instr === 'follow-and-attack-hero') {
+        const char = this.state.character
+        const mc = this.project.mainCharacter
+        if (char && mc) {
+          const dx = ns.x - char.x
+          const dy = ns.y - char.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist <= 40) {
+            ns.attackFired = true
+            this.state.variables[`npc_attacked_${obj.id}`] = true
+            if (!this.state.dialogText) {
+              this.state.dialogText = `${npc.name || 'NPC'} attacks you!`
+              this.state.dialogCallback = null
+            }
+          }
+        }
+      }
+    }
+  }
+
   // ── Rendering ─────────────────────────────────────────────────────────────
 
   private render() {
     const { canvas, ctx } = this
-    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
-
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    if (this.state.showTitleScreen) {
+      this.renderTitleScreen()
+      return
+    }
+
+    const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
 
     if (!scene) {
       ctx.fillStyle = '#1a1a2e'
@@ -589,6 +1028,69 @@ export class GameRuntime {
 
     if (this.state.dialogText) this.renderDialog()
     if (this.state.cinematic?.actionText) this.renderActionLabel()
+  }
+
+  private renderTitleScreen() {
+    const { canvas, ctx } = this
+    const ts = this.project.titleScreen
+
+    ctx.fillStyle = ts?.backgroundColor || '#000000'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    if (ts?.backgroundImageUrl) {
+      const img = this.imageCache.get(ts.backgroundImageUrl)
+      if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    }
+
+    if (ts?.titleText) {
+      const fontSize = ts.titleFontSize || 48
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.fillStyle = ts.titleColor || '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(ts.titleText, canvas.width / 2, canvas.height * 0.22)
+    }
+
+    if (ts?.subtitleText) {
+      const fontSize = ts.subtitleFontSize || 24
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.fillStyle = ts.subtitleColor || '#cccccc'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(ts.subtitleText, canvas.width / 2, canvas.height * 0.36)
+    }
+
+    this.titleScreenButtonRects = []
+    const buttons = [...(ts?.buttons ?? [])].sort((a, b) => a.order - b.order)
+    const btnW = Math.min(240, canvas.width * 0.5)
+    const btnH = 48
+    const btnGap = 16
+    const startY = canvas.height * 0.52
+
+    buttons.forEach((btn, i) => {
+      const x = (canvas.width - btnW) / 2
+      const y = startY + i * (btnH + btnGap)
+      this.titleScreenButtonRects.push({ id: btn.id, action: btn.action, x, y, w: btnW, h: btnH })
+
+      ctx.fillStyle = 'rgba(99,102,241,0.9)'
+      ctx.beginPath()
+      ctx.roundRect(x, y, btnW, btnH, 8)
+      ctx.fill()
+      ctx.strokeStyle = '#818cf8'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(btn.label, x + btnW / 2, y + btnH / 2)
+    })
+  }
+
+  private startGame(_buttonAction: string) {
+    this.state.showTitleScreen = false
+    this.loadScene(this.state.currentSceneId, undefined, true)
   }
 
   private renderScene(scene: Scene) {
@@ -633,14 +1135,28 @@ export class GameRuntime {
     ctx.save()
     ctx.globalAlpha = obj.opacity
 
-    // Apply cinematic NPC position override
+    // Apply NPC movement state position (if movement instruction set and not in cinematic)
+    const npcMoveState = (obj.type === 'character' && obj.npcId && !this.state.cinematic)
+      ? this.state.npcStates.get(obj.id)
+      : undefined
+    // Apply cinematic NPC position override (takes priority over movement state)
     const npcOverride = (obj.type === 'character' && obj.npcId && this.state.cinematic)
       ? this.state.cinematic.npcOverrides.get(obj.npcId)
       : undefined
     if (npcOverride) {
-      // Temporarily patch obj for rendering (shadow copy to avoid mutation)
       obj = { ...obj, x: npcOverride.x, y: npcOverride.y }
+    } else if (npcMoveState) {
+      obj = { ...obj, x: npcMoveState.x, y: npcMoveState.y }
     }
+
+    // Pre-compute scale-zone-adjusted render bounds for NPC character objects.
+    // Scale is anchored at the feet (bottom-centre), matching how the main
+    // character is rendered — the sprite shrinks upward from the ground.
+    const npcScale = (obj.type === 'character' && npcMoveState) ? (npcMoveState.scale ?? 1) : 1
+    const npcScaledW = obj.width * npcScale
+    const npcScaledH = obj.height * npcScale
+    const npcRenderX = Math.round(obj.x + (obj.width - npcScaledW) / 2)
+    const npcRenderY = Math.round(obj.y + obj.height - npcScaledH)
 
     if (obj.spriteSheetId) {
       const sheet = this.project.spriteSheets?.find((s) => s.id === obj.spriteSheetId)
@@ -654,7 +1170,7 @@ export class GameRuntime {
             img,
             col * sheet.frameWidth, row * sheet.frameHeight,
             sheet.frameWidth, sheet.frameHeight,
-            obj.x, obj.y, obj.width, obj.height,
+            npcRenderX, npcRenderY, npcScaledW, npcScaledH,
           )
           ctx.restore()
           return
@@ -666,21 +1182,24 @@ export class GameRuntime {
     if (obj.type === 'character' && obj.npcId) {
       const npc = (this.project.npcs ?? []).find((n: NpcCharacter) => n.id === obj.npcId)
       if (npc) {
-        const facingAnim = npc.animations[npc.defaultFacing]
+        const facing = npcMoveState?.facing ?? npc.defaultFacing
+        const facingAnim = npc.animations[facing]
         if (facingAnim?.spriteSheetId) {
           const sheet = this.project.spriteSheets?.find((s) => s.id === facingAnim.spriteSheetId)
           if (sheet) {
             const img = this.imageCache.get(sheet.imageUrl)
             if (img) {
               const animDef = sheet.animations.find((a) => a.id === facingAnim.animationId)
-              const fi = animDef?.startFrame ?? 0
+              const fi = (npcMoveState && npcMoveState.behaviorPhase === 'moving')
+                ? npcMoveState.animFrame
+                : (animDef?.startFrame ?? 0)
               const col = fi % sheet.cols
               const row = Math.floor(fi / sheet.cols)
               ctx.drawImage(
                 img,
                 col * sheet.frameWidth, row * sheet.frameHeight,
                 sheet.frameWidth, sheet.frameHeight,
-                obj.x, obj.y, obj.width, obj.height,
+                npcRenderX, npcRenderY, npcScaledW, npcScaledH,
               )
               ctx.restore()
               return
@@ -705,17 +1224,18 @@ export class GameRuntime {
       item: '#d97706',
       hotspot: 'rgba(99,102,241,0.15)',
       background: '#1e293b',
+      terrain: '#14532d',
     }
     ctx.fillStyle = placeholderColors[obj.type] ?? '#4f46e5'
-    ctx.fillRect(obj.x, obj.y, obj.width, obj.height)
+    ctx.fillRect(npcRenderX, npcRenderY, npcScaledW, npcScaledH)
 
     if (obj.type !== 'hotspot') {
       ctx.fillStyle = '#fff'
-      const fontSize = Math.max(10, Math.min(14, obj.height * 0.25))
+      const fontSize = Math.max(10, Math.min(14, npcScaledH * 0.25))
       ctx.font = `${fontSize}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(obj.name, obj.x + obj.width / 2, obj.y + obj.height / 2)
+      ctx.fillText(obj.name, npcRenderX + npcScaledW / 2, npcRenderY + npcScaledH / 2)
     }
     ctx.restore()
   }
@@ -819,6 +1339,19 @@ export class GameRuntime {
   }
 
   private handleClick(e: MouseEvent) {
+    if (this.state.showTitleScreen) {
+      const rect = this.canvas.getBoundingClientRect()
+      const cx = (e.clientX - rect.left) * (this.canvas.width / rect.width)
+      const cy = (e.clientY - rect.top) * (this.canvas.height / rect.height)
+      for (const br of this.titleScreenButtonRects) {
+        if (cx >= br.x && cx <= br.x + br.w && cy >= br.y && cy <= br.y + br.h) {
+          this.startGame(br.action)
+          return
+        }
+      }
+      return
+    }
+
     if (this.state.dialogText) {
       this.state.dialogText = null
       const cb = this.state.dialogCallback
@@ -850,8 +1383,8 @@ export class GameRuntime {
         char.x + mc.width / 2,
         char.y + mc.height / 2,
         pos.x, pos.y,
-        mc.width,
-        mc.height,
+        mc.width * char.scale,
+        mc.height * char.scale,
       )
       if (path.length > 0) {
         char.waypoints = path
@@ -862,6 +1395,17 @@ export class GameRuntime {
   }
 
   private handleMouseMove(e: MouseEvent) {
+    if (this.state.showTitleScreen) {
+      const rect = this.canvas.getBoundingClientRect()
+      const cx = (e.clientX - rect.left) * (this.canvas.width / rect.width)
+      const cy = (e.clientY - rect.top) * (this.canvas.height / rect.height)
+      const onBtn = this.titleScreenButtonRects.some(
+        (br) => cx >= br.x && cx <= br.x + br.w && cy >= br.y && cy <= br.y + br.h
+      )
+      this.canvas.style.cursor = onBtn ? 'pointer' : 'default'
+      return
+    }
+
     if (this.state.dialogText) return
     const pos = this.getScenePos(e)
     const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
@@ -893,7 +1437,12 @@ export class GameRuntime {
         const scene = this.project.scenes.find(
           (s) => s.id === action.value || s.name === action.value
         )
-        if (scene) this.loadScene(scene.id)
+        if (scene) {
+          const entryOverride = (action.entryX != null && action.entryY != null)
+            ? { x: action.entryX, y: action.entryY, facing: action.entryFacing }
+            : undefined
+          this.loadScene(scene.id, entryOverride)
+        }
         break
       }
       case 'show_dialog':
@@ -927,6 +1476,91 @@ export class GameRuntime {
         this.playCinematic(action.value)
         break
       }
+      case 'launch_minigame': {
+        this.launchMiniGame(action.value)
+        break
+      }
+    }
+  }
+
+  // ── Mini-game launcher ────────────────────────────────────────────────────
+
+  private async loadPhaser(): Promise<void> {
+    if ((window as any).Phaser) return
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js'
+      s.onload = () => resolve()
+      s.onerror = reject
+      document.head.appendChild(s)
+    })
+  }
+
+  private async loadMiniGameModule(source: string): Promise<any> {
+    const blob = new Blob([source], { type: 'text/javascript' })
+    const url = URL.createObjectURL(blob)
+    const mod = await import(/* @vite-ignore */ url)
+    URL.revokeObjectURL(url)
+    return mod.default
+  }
+
+  private async launchMiniGame(id: string) {
+    const mg = (this.project.miniGames ?? []).find((m) => m.id === id)
+    if (!mg?.source) return
+
+    const returnSceneId = this.state.currentSceneId
+    this.state.miniGame = { returnSceneId, instance: null }
+
+    if (this.frameId !== null) {
+      cancelAnimationFrame(this.frameId)
+      this.frameId = null
+    }
+
+    try {
+      await this.loadPhaser()
+      const mod = await this.loadMiniGameModule(mg.source)
+
+      // Create full-viewport overlay
+      const overlay = document.createElement('div')
+      overlay.style.cssText =
+        'position:fixed;inset:0;z-index:9999;background:#000;display:flex;align-items:center;justify-content:center;'
+
+      const canvas = document.createElement('canvas')
+      canvas.width = 800
+      canvas.height = 600
+      overlay.appendChild(canvas)
+      document.body.appendChild(overlay)
+
+      const teardown = (result: string, vars?: Record<string, string | number | boolean>) => {
+        this.state.miniGame?.instance?.destroy()
+        this.state.miniGame = null
+        document.body.removeChild(overlay)
+        if (vars) Object.assign(this.state.variables, vars)
+        this.state.variables['minigame_result'] = result
+        this.loadScene(returnSceneId, undefined, false)
+        this.state.running = true
+        this.lastFrameTime = 0
+        this.renderLoop()
+      }
+
+      const context = {
+        canvas,
+        Phaser: (window as any).Phaser,
+        assets: this.project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
+        variables: { ...this.state.variables },
+        onComplete: (result: 'win' | 'lose' | 'exit', updatedVars?: Record<string, string | number | boolean>) => {
+          teardown(result, updatedVars)
+        },
+      }
+
+      const instance = mod.launch(context)
+      if (this.state.miniGame) this.state.miniGame.instance = instance
+    } catch (err) {
+      console.error('Mini-game error:', err)
+      this.state.miniGame = null
+      this.state.running = true
+      this.lastFrameTime = 0
+      this.renderLoop()
     }
   }
 

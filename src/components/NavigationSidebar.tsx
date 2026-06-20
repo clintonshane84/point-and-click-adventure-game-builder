@@ -6,6 +6,7 @@ import {
   Layers,
   User,
   Film,
+  Gamepad2,
   Settings,
   Monitor,
   BookOpen,
@@ -31,6 +32,7 @@ const editorItems: NavItem[] = [
   { id: 'sprite', label: 'Sprites', icon: <Layers size={20} /> },
   { id: 'character', label: 'Characters', icon: <User size={20} /> },
   { id: 'cinematic', label: 'Cinematics', icon: <Film size={20} /> },
+  { id: 'minigame', label: 'Mini Games', icon: <Gamepad2 size={20} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
   { id: 'titlescreen', label: 'Title Screen', icon: <Monitor size={20} /> },
   { id: 'stage', label: 'Stage Editor', icon: <BookOpen size={20} /> },
@@ -88,6 +90,14 @@ export function NavigationSidebar() {
 
         {/* Build tools */}
         {buildItems.map(renderItem)}
+      </div>
+
+      {/* Version badge */}
+      <div className="shrink-0 border-t border-gray-700/60 flex items-center justify-center h-8">
+        <span className="group-hover:hidden text-gray-600 text-xs font-mono">v</span>
+        <span className="hidden group-hover:block text-gray-600 text-xs font-mono px-3">
+          v{__APP_VERSION__}
+        </span>
       </div>
     </nav>
   )

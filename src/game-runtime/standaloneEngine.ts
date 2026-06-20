@@ -99,12 +99,15 @@ export class GameEngine {
     this.objectVisibility = new Map();
     this.frameId = null;
     this.lastFrameTime = 0;
+    this.titleScreenButtonRects = [];
     this.state = this._freshState();
     this._boundClick = this._handleClick.bind(this);
     this._boundMove = this._handleMouseMove.bind(this);
   }
 
   _freshState() {
+    const ts=this.project.titleScreen;
+    const hasTitleScreen=!!(ts?.titleText||(ts?.buttons&&ts.buttons.length>0));
     return {
       currentSceneId: this.project.settings?.startingSceneId || this.project.scenes[0]?.id || '',
       variables: {},
@@ -114,7 +117,11 @@ export class GameEngine {
       dialogCallback: null,
       character: null,
       activeHotspots: new Set(),
+      activeTeleportZones: new Set(),
       cinematic: null,
+      npcStates: new Map(),
+      showTitleScreen: hasTitleScreen,
+      miniGame: null,
     };
   }
 
@@ -124,7 +131,12 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
-    this._loadScene(this.state.currentSceneId);
+    if(this.state.showTitleScreen){
+      const ts=this.project.titleScreen;
+      if(ts?.backgroundImageUrl) this._loadImage(ts.backgroundImageUrl);
+    } else {
+      this._loadScene(this.state.currentSceneId,undefined,true);
+    }
     this._loop();
   }
 
@@ -143,9 +155,10 @@ export class GameEngine {
     this.start();
   }
 
-  _loadScene(sceneId) {
+  _loadScene(sceneId, entryOverride, stageStart=false) {
     this.state.currentSceneId = sceneId;
     this.state.activeHotspots = new Set();
+    this.state.activeTeleportZones = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
@@ -167,17 +180,41 @@ export class GameEngine {
           }
         });
       }
-      const cp = scene.characterPlacement;
-      if (cp?.visible && mc) {
-        const facing = cp.facing || mc.defaultFacing || 'down';
-        this.state.character = {
-          x: cp.x, y: cp.y,
-          waypoints: [], waypointIndex: 0,
-          facing, moving: false,
-          animFrame: this._getAnimStartFrame(facing), animTimer: 0,
-          scale: 1, targetScale: 1, speedMult: 1, targetSpeedMult: 1,
-        };
-      } else { this.state.character = null; }
+      // Resolve spawn: entryOverride → characterPlacement (stage start only) → null
+      if(entryOverride&&mc){
+        const facing=entryOverride.facing||mc.defaultFacing||'down';
+        this.state.character={x:entryOverride.x,y:entryOverride.y,waypoints:[],waypointIndex:0,facing,moving:false,animFrame:this._getAnimStartFrame(facing),animTimer:0,scale:1,targetScale:1,speedMult:1,targetSpeedMult:1};
+      } else if(stageStart) {
+        const cp=scene.characterPlacement;
+        if(cp?.visible&&mc){
+          const facing=cp.facing||mc.defaultFacing||'down';
+          this.state.character={x:cp.x,y:cp.y,waypoints:[],waypointIndex:0,facing,moving:false,animFrame:this._getAnimStartFrame(facing),animTimer:0,scale:1,targetScale:1,speedMult:1,targetSpeedMult:1};
+        } else { this.state.character=null; }
+      } else {
+        this.state.character=null;
+      }
+      // Pre-seed activeHotspots so spawn-position hotspots don't fire 'enter' immediately
+      if(this.state.character&&mc){
+        const sfx=this.state.character.x+mc.width/2,sfy=this.state.character.y+mc.height;
+        for(const obj of scene.objects){
+          if(obj.type!=='hotspot') continue;
+          if(sfx>=obj.x&&sfx<=obj.x+obj.width&&sfy>=obj.y&&sfy<=obj.y+obj.height) this.state.activeHotspots.add(obj.id);
+        }
+      }
+      // Pre-seed activeTeleportZones so spawn-position teleport zones don't fire immediately
+      if(this.state.character&&mc){
+        const sfx=this.state.character.x+mc.width/2,sfy=this.state.character.y+mc.height;
+        for(const zone of (scene.teleportZones||[])){
+          if(sfx>=zone.x&&sfx<=zone.x+zone.width&&sfy>=zone.y&&sfy<=zone.y+zone.height) this.state.activeTeleportZones.add(zone.id);
+        }
+      }
+      // Initialize NPC movement states
+      const npcStateMap=new Map();
+      (scene.objects||[]).filter(o=>o.type==='character'&&o.npcId&&o.movementInstruction&&o.movementInstruction!=='none').forEach(o=>{
+        const npc=(this.project.npcs||[]).find(n=>n.id===o.npcId);
+        npcStateMap.set(o.id,{x:o.x,y:o.y,facing:npc?.defaultFacing||'down',animFrame:0,animTimer:0,waypoints:[],waypointIndex:0,behaviorTimer:0,behaviorPhase:'idle',attackFired:false,scale:1});
+      });
+      this.state.npcStates=npcStateMap;
     }
     const hotspotIds=new Set(scene?.objects.filter(o=>o.type==='hotspot').map(o=>o.id)??[]);
     this.project.events
@@ -190,10 +227,12 @@ export class GameEngine {
     const now = performance.now();
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16;
     this.lastFrameTime = now;
-    this._updateCharacter(dt);
-    const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-    if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);}
-    if(this.state.cinematic) this._updateCinematic(dt);
+    if(!this.state.showTitleScreen){
+      this._updateCharacter(dt);
+      const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
+      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
+      if(this.state.cinematic) this._updateCinematic(dt);
+    }
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
   }
@@ -202,7 +241,9 @@ export class GameEngine {
     const char=this.state.character,mc=this.project.mainCharacter;
     if(!char||!mc) return;
     const fx=char.x+mc.width/2, fy=char.y+mc.height;
+    const sceneIdAtEntry=this.state.currentSceneId;
     for(const obj of scene.objects){
+      if(this.state.currentSceneId!==sceneIdAtEntry) break;
       if(obj.type!=='hotspot') continue;
       const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
       if(!vis) continue;
@@ -229,6 +270,90 @@ export class GameEngine {
       if(fx>=z.x&&fx<=z.x+z.width&&fy>=z.y&&fy<=z.y+z.height){ts=z.scale;tm=z.speedMultiplier;break;}
     }
     char.targetScale=ts; char.targetSpeedMult=tm;
+  }
+
+  _checkTeleportZones(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const fx=char.x+mc.width/2,fy=char.y+mc.height;
+    for(const zone of (scene.teleportZones||[])){
+      const inside=fx>=zone.x&&fx<=zone.x+zone.width&&fy>=zone.y&&fy<=zone.y+zone.height;
+      const wasInside=this.state.activeTeleportZones.has(zone.id);
+      if(inside&&!wasInside){
+        this.state.activeTeleportZones.add(zone.id);
+        if(zone.linkedSceneId&&zone.linkedZoneId){
+          const tScene=this.project.scenes.find(s=>s.id===zone.linkedSceneId);
+          const tZone=tScene?(tScene.teleportZones||[]).find(z=>z.id===zone.linkedZoneId):null;
+          if(tScene&&tZone){
+            const ax=Math.max(0,Math.min(tScene.width-mc.width,tZone.x+tZone.width/2-mc.width/2));
+            const ay=Math.max(0,Math.min(tScene.height-mc.height,tZone.y+tZone.height/2-mc.height/2));
+            const facing=zone.entryFacing||char.facing;
+            this._loadScene(tScene.id,{x:ax,y:ay,facing});
+            return;
+          }
+        }
+      } else if(!inside&&wasInside){
+        this.state.activeTeleportZones.delete(zone.id);
+      }
+    }
+  }
+  _findSafeArrival(scene,mc,nomX,nomY,side) {
+    const padX=Math.max(0,mc.width/2-1),padY=Math.max(0,mc.height/2-1);
+    const zones=scene.blockedZones||[];
+    const overlaps=(x,y)=>{
+      for(const z of zones){
+        if(x-padX<z.x+z.width&&x+mc.width+padX>z.x&&y-padY<z.y+z.height&&y+mc.height+padY>z.y) return true;
+      }
+      return false;
+    };
+    if(!overlaps(nomX,nomY)) return {x:nomX,y:nomY};
+    const step=4;
+    if(side==='left'||side==='right'){
+      const maxScan=scene.height;
+      for(let d=step;d<=maxScan;d+=step){
+        for(const cy of [nomY+d,nomY-d]){
+          const c=Math.max(0,Math.min(scene.height-mc.height,cy));
+          if(!overlaps(nomX,c)) return {x:nomX,y:c};
+        }
+      }
+    } else {
+      const maxScan=scene.width;
+      for(let d=step;d<=maxScan;d+=step){
+        for(const cx of [nomX+d,nomX-d]){
+          const c=Math.max(0,Math.min(scene.width-mc.width,cx));
+          if(!overlaps(c,nomY)) return {x:c,y:nomY};
+        }
+      }
+    }
+    return {x:nomX,y:nomY};
+  }
+  _checkSceneEdges(scene) {
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    if(!scene.exits||scene.exits.length===0) return;
+    let side=null;
+    if(char.x<=0) side='left';
+    else if(char.x+mc.width>=scene.width) side='right';
+    else if(char.y<=0) side='top';
+    else if(char.y+mc.height>=scene.height) side='bottom';
+    if(!side) return;
+    const exitDef=scene.exits.find(e=>e.side===side);
+    if(!exitDef) return;
+    const targetScene=this.project.scenes.find(s=>s.id===exitDef.targetSceneId);
+    if(!targetScene) return;
+    const sceneIdAtEntry=this.state.currentSceneId;
+    const clampedY=Math.max(0,Math.min(targetScene.height-mc.height,char.y));
+    const clampedX=Math.max(0,Math.min(targetScene.width-mc.width,char.x));
+    let nomX,nomY;
+    if(side==='right'){nomX=40;nomY=clampedY;}
+    else if(side==='left'){nomX=targetScene.width-40-mc.width;nomY=clampedY;}
+    else if(side==='top'){nomX=clampedX;nomY=targetScene.height-40-mc.height;}
+    else{nomX=clampedX;nomY=40;}
+    const safe=this._findSafeArrival(targetScene,mc,nomX,nomY,side);
+    const inferredFacing=side==='right'?'right':side==='left'?'left':side==='top'?'up':'down';
+    const facing=exitDef.entryFacing||inferredFacing;
+    if(this.state.currentSceneId!==sceneIdAtEntry) return;
+    this._loadScene(targetScene.id,{x:safe.x,y:safe.y,facing});
   }
 
   _updateCharacter(dt) {
@@ -266,8 +391,9 @@ export class GameEngine {
 
   _render() {
     const { canvas, ctx } = this;
-    const scene = this.project.scenes.find(s => s.id === this.state.currentSceneId);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if(this.state.showTitleScreen){ this._renderTitleScreen(); return; }
+    const scene = this.project.scenes.find(s => s.id === this.state.currentSceneId);
     if (!scene) {
       ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,canvas.width,canvas.height);
       ctx.fillStyle = '#e2e8f0'; ctx.font = '20px sans-serif';
@@ -292,28 +418,35 @@ export class GameEngine {
       if(!vis) continue;
       if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
       let ro=obj;
+      const _ns=(obj.type==='character'&&obj.npcId&&!this.state.cinematic)?this.state.npcStates.get(obj.id):null;
       const _ov=obj.type==='character'&&obj.npcId&&this.state.cinematic?this.state.cinematic.npcOverrides.get(obj.npcId):null;
       if(_ov) ro=Object.assign({},obj,{x:_ov.x,y:_ov.y});
+      else if(_ns) ro=Object.assign({},obj,{x:_ns.x,y:_ns.y});
+      const _npcScale=(ro.type==='character'&&_ns)?(_ns.scale??1):1;
+      const _npcSW=ro.width*_npcScale,_npcSH=ro.height*_npcScale;
+      const _npcRX=Math.round(ro.x+(ro.width-_npcSW)/2),_npcRY=Math.round(ro.y+ro.height-_npcSH);
       ctx.save(); ctx.globalAlpha=ro.opacity;
       const ssSheet=ro.spriteSheetId?this.project.spriteSheets?.find(s=>s.id===ro.spriteSheetId):null;
       const ssImg=ssSheet?this.imageCache.get(ssSheet.imageUrl):null;
       if(ssImg&&ssSheet){
         const fi=ro.frameIndex??0,col=fi%ssSheet.cols,row=Math.floor(fi/ssSheet.cols);
-        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,ro.x,ro.y,ro.width,ro.height);
+        ctx.drawImage(ssImg,col*ssSheet.frameWidth,row*ssSheet.frameHeight,ssSheet.frameWidth,ssSheet.frameHeight,_npcRX,_npcRY,_npcSW,_npcSH);
         ctx.restore(); continue;
       }
       if(ro.type==='character'&&ro.npcId){
         const npc=(this.project.npcs||[]).find(n=>n.id===ro.npcId);
         if(npc){
-          const fa=npc.animations[npc.defaultFacing];
+          const facing=(_ns&&_ns.behaviorPhase==='moving')?_ns.facing:npc.defaultFacing;
+          const fa=npc.animations[facing]||npc.animations[npc.defaultFacing];
           if(fa?.spriteSheetId){
             const nsh=this.project.spriteSheets?.find(s=>s.id===fa.spriteSheetId);
             if(nsh){
               const nim=this.imageCache.get(nsh.imageUrl);
               if(nim){
                 const adef=nsh.animations.find(a=>a.id===fa.animationId);
-                const fi=adef?.startFrame??0,col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
-                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,ro.x,ro.y,ro.width,ro.height);
+                const fi=(_ns&&_ns.behaviorPhase==='moving')?_ns.animFrame:(adef?.startFrame??0);
+                const col=fi%nsh.cols,row=Math.floor(fi/nsh.cols);
+                ctx.drawImage(nim,col*nsh.frameWidth,row*nsh.frameHeight,nsh.frameWidth,nsh.frameHeight,_npcRX,_npcRY,_npcSW,_npcSH);
                 ctx.restore(); continue;
               }
             }
@@ -324,13 +457,13 @@ export class GameEngine {
       if(img){
         ctx.drawImage(img,ro.x,ro.y,ro.width,ro.height);
       } else {
-        const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b'};
+        const colors={sprite:'#4f46e5',character:'#7c3aed',item:'#d97706',hotspot:'rgba(99,102,241,0.15)',background:'#1e293b',terrain:'#14532d'};
         ctx.fillStyle=colors[ro.type]||'#4f46e5';
-        ctx.fillRect(ro.x,ro.y,ro.width,ro.height);
+        ctx.fillRect(_npcRX,_npcRY,_npcSW,_npcSH);
         if(ro.type!=='hotspot'){
           ctx.fillStyle='#fff'; ctx.font='14px sans-serif';
           ctx.textAlign='center'; ctx.textBaseline='middle';
-          ctx.fillText(ro.name,ro.x+ro.width/2,ro.y+ro.height/2);
+          ctx.fillText(ro.name,_npcRX+_npcSW/2,_npcRY+_npcSH/2);
         }
       }
       ctx.restore();
@@ -339,6 +472,122 @@ export class GameEngine {
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
     if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
+  }
+
+  _renderTitleScreen(){
+    const{canvas,ctx}=this,ts=this.project.titleScreen;
+    ctx.fillStyle=ts?.backgroundColor||'#000000';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(ts?.backgroundImageUrl){const img=this.imageCache.get(ts.backgroundImageUrl);if(img)ctx.drawImage(img,0,0,canvas.width,canvas.height);}
+    if(ts?.titleText){
+      ctx.font='bold '+(ts.titleFontSize||48)+'px sans-serif';
+      ctx.fillStyle=ts.titleColor||'#ffffff';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(ts.titleText,canvas.width/2,canvas.height*0.22);
+    }
+    if(ts?.subtitleText){
+      ctx.font=(ts.subtitleFontSize||24)+'px sans-serif';
+      ctx.fillStyle=ts.subtitleColor||'#cccccc';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(ts.subtitleText,canvas.width/2,canvas.height*0.36);
+    }
+    this.titleScreenButtonRects=[];
+    const btns=[...(ts?.buttons||[])].sort((a,b)=>a.order-b.order);
+    const bw=Math.min(240,canvas.width*0.5),bh=48,bg=16,sy=canvas.height*0.52;
+    btns.forEach((btn,i)=>{
+      const x=(canvas.width-bw)/2,y=sy+i*(bh+bg);
+      this.titleScreenButtonRects.push({id:btn.id,action:btn.action,x,y,w:bw,h:bh});
+      ctx.fillStyle='rgba(99,102,241,0.9)';
+      ctx.beginPath();ctx.roundRect(x,y,bw,bh,8);ctx.fill();
+      ctx.strokeStyle='#818cf8';ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle='#ffffff';ctx.font='bold 16px sans-serif';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(btn.label,x+bw/2,y+bh/2);
+    });
+  }
+
+  _startGame(_action){
+    this.state.showTitleScreen=false;
+    this._loadScene(this.state.currentSceneId,undefined,true);
+  }
+
+  _updateNpcs(dt,scene){
+    const NPC_SPEEDS={'none':0,'roam-slow-and-eat-grass':50,'roam-human-in-field':120,'follow-hero':150,'follow-and-attack-hero':180};
+    for(const obj of scene.objects){
+      if(obj.type!=='character'||!obj.npcId) continue;
+      const instr=obj.movementInstruction||'none';
+      if(instr==='none') continue;
+      const ns=this.state.npcStates.get(obj.id);
+      if(!ns) continue;
+      const npc=(this.project.npcs||[]).find(n=>n.id===obj.npcId);
+      if(!npc) continue;
+      const speed=NPC_SPEEDS[instr]||0;
+      // Compute NPC scale from scale zones
+      const npcFX=ns.x+obj.width/2,npcFY=ns.y+obj.height;
+      let npcScale=1;
+      for(const z of (scene.scaleZones||[])){if(npcFX>=z.x&&npcFX<=z.x+z.width&&npcFY>=z.y&&npcFY<=z.y+z.height){npcScale=z.scale;break;}}
+      ns.scale=npcScale;
+      const snW=npc.width*npcScale,snH=npc.height*npcScale;
+      ns.behaviorTimer=Math.max(0,ns.behaviorTimer-dt);
+      if(ns.behaviorPhase==='idle'&&ns.behaviorTimer<=0){
+        if(instr==='roam-slow-and-eat-grass'){
+          const angle=Math.random()*Math.PI*2,dist=80+Math.random()*120;
+          const tx=Math.max(0,Math.min(scene.width-obj.width,ns.x+Math.cos(angle)*dist));
+          const ty=Math.max(0,Math.min(scene.height-obj.height,ns.y+Math.sin(angle)*dist));
+          ns.waypoints=findPath(scene.blockedZones||[],scene.width,scene.height,ns.x+obj.width/2,ns.y+obj.height,tx+obj.width/2,ty+obj.height,snW,snH);
+          ns.waypointIndex=0;ns.behaviorPhase=ns.waypoints.length>0?'moving':'idle';
+          if(ns.behaviorPhase==='idle') ns.behaviorTimer=2000+Math.random()*4000;
+        } else if(instr==='roam-human-in-field'){
+          const tx=Math.random()*(scene.width-obj.width);
+          const ty=Math.random()*(scene.height-obj.height);
+          ns.waypoints=findPath(scene.blockedZones||[],scene.width,scene.height,ns.x+obj.width/2,ns.y+obj.height,tx+obj.width/2,ty+obj.height,snW,snH);
+          ns.waypointIndex=0;ns.behaviorPhase=ns.waypoints.length>0?'moving':'idle';
+          if(ns.behaviorPhase==='idle') ns.behaviorTimer=1000+Math.random()*2000;
+        } else if(instr==='follow-hero'||instr==='follow-and-attack-hero'){
+          const char=this.state.character,mc=this.project.mainCharacter;
+          if(char&&mc){
+            const stopGap=instr==='follow-and-attack-hero'?40:80;
+            const dx=ns.x-char.x,dy=ns.y-char.y,dist=Math.sqrt(dx*dx+dy*dy);
+            if(dist>stopGap){
+              ns.waypoints=findPath(scene.blockedZones||[],scene.width,scene.height,ns.x+obj.width/2,ns.y+obj.height,char.x+mc.width/2,char.y+mc.height,snW,snH);
+              ns.waypointIndex=0;ns.behaviorPhase=ns.waypoints.length>0?'moving':'idle';
+            } else {
+              if(instr==='follow-and-attack-hero'&&!ns.attackFired){
+                ns.attackFired=true;this.state.variables['npc_attacked_'+obj.id]=true;
+                if(!this.state.dialogText) this.state.dialogText=(npc.name||'NPC')+' attacks you!';
+              }
+              ns.behaviorTimer=2000;
+            }
+          } else {ns.behaviorTimer=2000;}
+        }
+      }
+      if(ns.behaviorPhase==='moving'){
+        const target=ns.waypoints[ns.waypointIndex];
+        if(!target){
+          ns.behaviorPhase='idle';
+          ns.behaviorTimer=instr==='roam-slow-and-eat-grass'?3000+Math.random()*5000:instr==='roam-human-in-field'?1000+Math.random()*2000:1500+Math.random()*1000;
+        } else {
+          const tx=target.x-obj.width/2,ty=target.y-obj.height;
+          const dx=tx-ns.x,dy=ty-ns.y,dist=Math.sqrt(dx*dx+dy*dy);
+          if(dist<3){ns.x=tx;ns.y=ty;ns.waypointIndex++;}
+          else {
+            if(Math.abs(dx)>=Math.abs(dy)){ns.facing=dx>0?'right':'left';}else{ns.facing=dy>0?'down':'up';}
+            const step=speed*(dt/1000),ratio=Math.min(step/dist,1);
+            ns.x+=dx*ratio;ns.y+=dy*ratio;
+            const ac=npc.animations[ns.facing];
+            if(ac?.spriteSheetId){
+              const sh=this.project.spriteSheets?.find(s=>s.id===ac.spriteSheetId);
+              const ad=sh?.animations.find(a=>a.id===ac.animationId);
+              if(ad&&ad.fps>0){const fms=1000/ad.fps;ns.animTimer+=dt;while(ns.animTimer>=fms){ns.animTimer-=fms;ns.animFrame++;if(ns.animFrame>ad.endFrame)ns.animFrame=ad.startFrame;}}
+            }
+          }
+        }
+      }
+      if(instr==='follow-and-attack-hero'&&!ns.attackFired){
+        const char=this.state.character,mc=this.project.mainCharacter;
+        if(char&&mc){const dx=ns.x-char.x,dy=ns.y-char.y;if(Math.sqrt(dx*dx+dy*dy)<=40){ns.attackFired=true;this.state.variables['npc_attacked_'+obj.id]=true;if(!this.state.dialogText) this.state.dialogText=(npc.name||'NPC')+' attacks you!';}}
+      }
+    }
   }
 
   _renderCharacter() {
@@ -394,6 +643,15 @@ export class GameEngine {
   }
 
   _handleClick(e) {
+    if(this.state.showTitleScreen){
+      const r=this.canvas.getBoundingClientRect();
+      const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
+      const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+      for(const br of this.titleScreenButtonRects){
+        if(cx>=br.x&&cx<=br.x+br.w&&cy>=br.y&&cy<=br.y+br.h){this._startGame(br.action);return;}
+      }
+      return;
+    }
     if (this.state.dialogText) {
       this.state.dialogText=null;
       const cb=this.state.dialogCallback; this.state.dialogCallback=null; if(cb)cb();
@@ -412,12 +670,20 @@ export class GameEngine {
     const char=this.state.character, mc=this.project.mainCharacter;
     if (char&&mc) {
       const path=findPath(scene.blockedZones||[],scene.width,scene.height,
-        char.x+mc.width/2, char.y+mc.height/2, pos.x, pos.y, mc.width, mc.height);
+        char.x+mc.width/2, char.y+mc.height/2, pos.x, pos.y, mc.width*(char.scale??1), mc.height*(char.scale??1));
       if (path.length>0) { char.waypoints=path; char.waypointIndex=0; char.moving=true; }
     }
   }
 
   _handleMouseMove(e) {
+    if(this.state.showTitleScreen){
+      const r=this.canvas.getBoundingClientRect();
+      const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
+      const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+      const onBtn=this.titleScreenButtonRects.some(br=>cx>=br.x&&cx<=br.x+br.w&&cy>=br.y&&cy<=br.y+br.h);
+      this.canvas.style.cursor=onBtn?'pointer':'default';
+      return;
+    }
     if (this.state.dialogText) return;
     const pos=this._scenePos(e);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
@@ -437,8 +703,12 @@ export class GameEngine {
   _execAction(action){
     switch(action.type){
       case 'navigate_scene':{
-        const s=this.project.scenes.find(s=>s.id===action.value||s.name===action.value);
-        if(s) this._loadScene(s.id); break;
+        const s=this.project.scenes.find(sc=>sc.id===action.value||sc.name===action.value);
+        if(s){
+          const eo=(action.entryX!=null&&action.entryY!=null)?{x:action.entryX,y:action.entryY,facing:action.entryFacing}:undefined;
+          this._loadScene(s.id,eo);
+        }
+        break;
       }
       case 'show_dialog': this.state.dialogText=action.value; break;
       case 'set_variable':{
@@ -454,13 +724,14 @@ export class GameEngine {
         break;
       }
       case 'play_cinematic': this._playCinematic(action.value); break;
+      case 'launch_minigame': this._launchMiniGame(action.value); break;
     }
   }
 
   _playCinematic(cinematicId){
     const cine=(this.project.cinematics||[]).find(c=>c.id===cinematicId);
     if(!cine||cine.steps.length===0) return;
-    if(cine.sceneId&&cine.sceneId!==this.state.currentSceneId) this._loadScene(cine.sceneId);
+    if(cine.sceneId&&cine.sceneId!==this.state.currentSceneId) this._loadScene(cine.sceneId,undefined,true);
     this.state.cinematic={
       steps:cine.steps,
       stepIndex:0,
@@ -489,7 +760,7 @@ export class GameEngine {
           const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
           if(char&&mc&&scene){
             const path=findPath(scene.blockedZones||[],scene.width,scene.height,
-              char.x+mc.width/2,char.y+mc.height/2,step.targetX??0,step.targetY??0,mc.width,mc.height);
+              char.x+mc.width/2,char.y+mc.height/2,step.targetX??0,step.targetY??0,mc.width*(char.scale??1),mc.height*(char.scale??1));
             if(path.length>0){char.waypoints=path;char.waypointIndex=0;char.moving=true;}
           }
           cine.mode='walking_main';
@@ -560,7 +831,7 @@ export class GameEngine {
     switch(ca){
       case 'navigate_scene':{
         const s=this.project.scenes.find(s=>s.id===cv||s.name===cv);
-        if(s) this._loadScene(s.id);
+        if(s) this._loadScene(s.id,undefined,true);
         break;
       }
       case 'show_dialog': this.state.dialogText=cv; break;
@@ -628,6 +899,68 @@ export class GameEngine {
     ctx.textAlign='center';
     ctx.textBaseline='middle';
     ctx.fillText(text,canvas.width/2,y+h/2);
+  }
+
+  async _loadPhaser(){
+    if(window.Phaser) return;
+    return new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
+      s.onload=()=>resolve();s.onerror=reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  async _loadMiniGameModule(source){
+    const blob=new Blob([source],{type:'text/javascript'});
+    const url=URL.createObjectURL(blob);
+    const mod=await import(url);
+    URL.revokeObjectURL(url);
+    return mod.default;
+  }
+
+  async _launchMiniGame(id){
+    const mg=(this.project.miniGames||[]).find(m=>m.id===id);
+    if(!mg?.source) return;
+    const returnSceneId=this.state.currentSceneId;
+    this.state.miniGame={returnSceneId,instance:null};
+    if(this.frameId!==null){cancelAnimationFrame(this.frameId);this.frameId=null;}
+    try{
+      await this._loadPhaser();
+      const mod=await this._loadMiniGameModule(mg.source);
+      const overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;z-index:9999;background:#000;display:flex;align-items:center;justify-content:center;';
+      const canvas=document.createElement('canvas');
+      canvas.width=800;canvas.height=600;
+      overlay.appendChild(canvas);
+      document.body.appendChild(overlay);
+      const teardown=(result,vars)=>{
+        this.state.miniGame?.instance?.destroy();
+        this.state.miniGame=null;
+        document.body.removeChild(overlay);
+        if(vars) Object.assign(this.state.variables,vars);
+        this.state.variables['minigame_result']=result;
+        this._loadScene(returnSceneId,undefined,false);
+        this.state.running=true;
+        this.lastFrameTime=0;
+        this._loop();
+      };
+      const context={
+        canvas,
+        Phaser:window.Phaser,
+        assets:(this.project.assets||[]).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type})),
+        variables:{...this.state.variables},
+        onComplete:(result,updatedVars)=>teardown(result,updatedVars),
+      };
+      const instance=mod.launch(context);
+      if(this.state.miniGame) this.state.miniGame.instance=instance;
+    }catch(err){
+      console.error('Mini-game error:',err);
+      this.state.miniGame=null;
+      this.state.running=true;
+      this.lastFrameTime=0;
+      this._loop();
+    }
   }
 
   _getCharSheet(facing){

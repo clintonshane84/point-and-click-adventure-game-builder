@@ -7,6 +7,7 @@ export type EditorType =
   | 'sprite'
   | 'character'
   | 'cinematic'
+  | 'minigame'
   | 'settings'
   | 'titlescreen'
   | 'stage'
@@ -16,7 +17,14 @@ export type EditorType =
   | 'export'
 
 // Scene types
-export type SceneObjectType = 'sprite' | 'background' | 'hotspot' | 'character' | 'item'
+export type SceneObjectType = 'sprite' | 'background' | 'hotspot' | 'character' | 'item' | 'terrain'
+
+export type NpcMovementInstruction =
+  | 'none'
+  | 'roam-slow-and-eat-grass'
+  | 'roam-human-in-field'
+  | 'follow-hero'
+  | 'follow-and-attack-hero'
 
 export interface SceneObject {
   id: string
@@ -31,6 +39,7 @@ export interface SceneObject {
   spriteSheetId?: string
   frameIndex?: number
   npcId?: string
+  movementInstruction?: NpcMovementInstruction
   zIndex: number
   visible: boolean
   properties: Record<string, string | number | boolean>
@@ -58,6 +67,26 @@ export interface ScaleZone {
   height: number
   scale: number          // character size multiplier inside zone (0.1–1.0)
   speedMultiplier: number // walk speed multiplier inside zone (0.1–1.0)
+}
+
+export interface TeleportZone {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  linkedSceneId?: string
+  linkedZoneId?: string
+  entryFacing?: FacingDirection
+}
+
+export type SceneExitSide = 'left' | 'right' | 'top' | 'bottom'
+
+export interface SceneExit {
+  side: SceneExitSide
+  targetSceneId: string         // destination scene ID
+  entryFacing?: FacingDirection // optional facing override; if omitted, inferred from direction
 }
 
 export interface CharacterAnimation {
@@ -113,6 +142,8 @@ export interface Scene {
   characterPlacement?: CharacterPlacement
   blockedZones?: BlockedZone[]
   scaleZones?: ScaleZone[]
+  teleportZones?: TeleportZone[]
+  exits?: SceneExit[]
 }
 
 // Event types
@@ -128,12 +159,16 @@ export type ActionType =
   | 'play_animation'
   | 'stop_animation'
   | 'play_cinematic'
+  | 'launch_minigame'
 
 export interface EventAction {
   id: string
   type: ActionType
   value: string
   delay?: number
+  entryX?: number          // hero X in destination scene (navigate_scene only)
+  entryY?: number          // hero Y in destination scene (navigate_scene only)
+  entryFacing?: FacingDirection  // hero facing in destination scene (navigate_scene only)
 }
 
 export interface EventTrigger {
@@ -313,6 +348,14 @@ export interface CursorConfig {
   activeState: CursorStateName
 }
 
+// Mini-game types
+export interface MiniGame {
+  id: string
+  name: string
+  description: string
+  source: string        // full JS module source (ES module with default export)
+}
+
 // Cinematic types
 export type CinematicStepType =
   | 'walk_to'
@@ -372,4 +415,5 @@ export interface GameProject {
   stages: Stage[]
   goals: Goal[]
   cursorConfig: CursorConfig
+  miniGames?: MiniGame[]
 }
