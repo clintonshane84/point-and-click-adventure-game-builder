@@ -11,6 +11,19 @@ export interface MiniGameAsset {
 }
 
 /**
+ * Per-slot frame information provided when a sprite-sheet (not a plain image)
+ * is assigned to a sprite slot in the Mini-Game editor.
+ */
+export interface SpriteFrameInfo {
+  /** Width of each individual frame in pixels. */
+  frameWidth: number
+  /** Height of each individual frame in pixels. */
+  frameHeight: number
+  /** Total number of frames in the sprite sheet. */
+  frameCount: number
+}
+
+/**
  * Context object provided by the builder when launching your mini-game.
  * Access via the `ctx` parameter of your `launch()` function.
  */
@@ -28,8 +41,27 @@ export interface MiniGameContext {
    * Resolved sprite map: slotName → asset URL.
    * Slots are configured in the Mini-Game editor. If no asset is assigned to a slot, the key will be absent.
    * Example slots used by the Chase & Rescue game: 'david', 'lion', 'sheep', 'background'.
+   *
+   * When the slot is backed by a sprite sheet, the URL points to the full sprite-strip image.
+   * Use `ctx.spriteFrames[slot]` to get frame dimensions for `this.load.spritesheet()`.
    */
   spriteMap: Record<string, string>
+
+  /**
+   * Frame info for each slot that was assigned a sprite sheet (rather than a plain image).
+   * If a slot has no entry here, treat `spriteMap[slot]` as a plain image URL.
+   *
+   * Usage in preload():
+   *   const sf = ctx.spriteFrames['david']
+   *   if (sf) {
+   *     this.load.spritesheet('spr_david', ctx.spriteMap['david'], {
+   *       frameWidth: sf.frameWidth, frameHeight: sf.frameHeight
+   *     })
+   *   } else {
+   *     this.load.image('spr_david', ctx.spriteMap['david'])
+   *   }
+   */
+  spriteFrames: Record<string, SpriteFrameInfo>
 
   /** Current game variables at the time the mini-game was launched. Read-only — changes are not reflected back unless passed to onComplete. */
   variables: Record<string, string | number | boolean>

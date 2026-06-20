@@ -34,7 +34,8 @@ const ShepherdsWatch = {
 
   launch(ctx) {
     const { canvas, Phaser, onComplete } = ctx
-    const spriteMap = ctx.spriteMap || {}
+    const spriteMap    = ctx.spriteMap    || {}
+    const spriteFrames = ctx.spriteFrames || {}
 
     const W = canvas.width  || 800
     const H = canvas.height || 600
@@ -82,11 +83,21 @@ const ShepherdsWatch = {
     }
 
     function preload() {
-      if (spriteMap.background) this.load.image('spr_bg',    spriteMap.background)
-      if (spriteMap.sheep)      this.load.image('spr_sheep', spriteMap.sheep)
-      if (spriteMap.lion)       this.load.image('spr_lion',  spriteMap.lion)
-      if (spriteMap.bear)       this.load.image('spr_bear',  spriteMap.bear)
-      if (spriteMap.david)      this.load.image('spr_david', spriteMap.david)
+      function loadSlot(slot, texKey) {
+        if (!spriteMap[slot]) return
+        const sf = spriteFrames[slot]
+        if (sf) {
+          this.load.spritesheet(texKey, spriteMap[slot], { frameWidth: sf.frameWidth, frameHeight: sf.frameHeight })
+        } else {
+          this.load.image(texKey, spriteMap[slot])
+        }
+      }
+      // Background is always a full image regardless of frame info
+      if (spriteMap.background) this.load.image('spr_bg', spriteMap.background)
+      loadSlot.call(this, 'sheep',  'spr_sheep')
+      loadSlot.call(this, 'lion',   'spr_lion')
+      loadSlot.call(this, 'bear',   'spr_bear')
+      loadSlot.call(this, 'david',  'spr_david')
     }
 
     // ── create ─────────────────────────────────────────────────────────────────
@@ -149,7 +160,10 @@ const ShepherdsWatch = {
 
     function makeSheep(scene, x, y) {
       if (scene.textures.exists('spr_sheep')) {
-        return scene.add.image(x, y, 'spr_sheep').setDisplaySize(36, 30).setDepth(3)
+        // Sheep are static props — show frame 0 if sprite sheet, full image otherwise
+        return spriteFrames.sheep
+          ? scene.add.sprite(x, y, 'spr_sheep', 0).setDisplaySize(36, 30).setDepth(3)
+          : scene.add.image(x, y, 'spr_sheep').setDisplaySize(36, 30).setDepth(3)
       }
       const g = scene.add.graphics().setDepth(3)
       drawSheepAt(g, x, y)
@@ -230,9 +244,27 @@ const ShepherdsWatch = {
 
     function makePredator(scene, type, x, y) {
       const sprKey = type === 'lion' ? 'spr_lion' : 'spr_bear'
+      const sfKey  = type  // 'lion' | 'bear'
+      const w = type === 'lion' ? 60 : 64
+      const h = type === 'lion' ? 52 : 54
       if (scene.textures.exists(sprKey)) {
+        if (spriteFrames[sfKey]) {
+          const animKey = `watch_${sfKey}_run`
+          if (!scene.anims.exists(animKey)) {
+            scene.anims.create({
+              key:       animKey,
+              frames:    scene.anims.generateFrameNumbers(sprKey, { start: 0, end: spriteFrames[sfKey].frameCount - 1 }),
+              frameRate: 8,
+              repeat:    -1,
+            })
+          }
+          return scene.add.sprite(x, y, sprKey)
+            .setDisplaySize(w, h)
+            .setInteractive({ cursor: 'pointer' })
+            .play(animKey)
+        }
         return scene.add.image(x, y, sprKey)
-          .setDisplaySize(type === 'lion' ? 60 : 64, type === 'lion' ? 52 : 54)
+          .setDisplaySize(w, h)
           .setInteractive({ cursor: 'pointer' })
       }
       const g = scene.add.graphics()

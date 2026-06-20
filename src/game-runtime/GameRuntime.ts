@@ -1544,9 +1544,17 @@ export class GameRuntime {
       }
 
       const spriteMap: Record<string, string> = {}
-      for (const [slot, assetId] of Object.entries(mg.spriteMap ?? {})) {
-        const asset = this.project.assets.find((a) => a.id === assetId)
-        if (asset?.url) spriteMap[slot] = asset.url
+      const spriteFrames: Record<string, { frameWidth: number; frameHeight: number; frameCount: number }> = {}
+      for (const [slot, ssId] of Object.entries(mg.spriteMap ?? {})) {
+        const ss = this.project.spriteSheets?.find((s) => s.id === ssId)
+        if (ss) {
+          spriteMap[slot] = ss.imageUrl
+          spriteFrames[slot] = {
+            frameWidth:  ss.frameWidth,
+            frameHeight: ss.frameHeight,
+            frameCount:  ss.frames.length,
+          }
+        }
       }
 
       const context = {
@@ -1554,6 +1562,7 @@ export class GameRuntime {
         Phaser: (window as any).Phaser,
         assets: this.project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
         spriteMap,
+        spriteFrames,
         variables: { ...this.state.variables },
         onComplete: (result: 'win' | 'lose' | 'exit', updatedVars?: Record<string, string | number | boolean>) => {
           teardown(result, updatedVars)

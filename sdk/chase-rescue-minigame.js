@@ -33,7 +33,8 @@ const ChaseRescue = {
 
   launch(ctx) {
     const { canvas, Phaser, onComplete } = ctx
-    const spriteMap = ctx.spriteMap || {}
+    const spriteMap    = ctx.spriteMap    || {}
+    const spriteFrames = ctx.spriteFrames || {}
 
     const W = canvas.width  || 800
     const H = canvas.height || 600
@@ -78,10 +79,12 @@ const ChaseRescue = {
     // Character graphics (cleared + redrawn each frame)
     let davidGfx, predGfx
 
-    // Sprite image objects (set in create() when spriteMap slots are provided)
-    let davidSprite = null
-    let lionSprite  = null
-    let sheepSprite = null
+    // Sprite objects (set in create() when spriteMap slots are provided)
+    let davidSprite     = null
+    let lionSprite      = null
+    let sheepSprite     = null
+    let davidIsAnimated = false   // true when backed by a multi-frame sprite sheet
+    let lionIsAnimated  = false
 
     // Mid-ground tree objects (scrolling parallax)
     const bgTrees = []
@@ -104,10 +107,19 @@ const ChaseRescue = {
     }
 
     function preload() {
-      if (spriteMap.david)      this.load.image('spr_david', spriteMap.david)
-      if (spriteMap.lion)       this.load.image('spr_lion',  spriteMap.lion)
-      if (spriteMap.sheep)      this.load.image('spr_sheep', spriteMap.sheep)
-      if (spriteMap.background) this.load.image('spr_bg',    spriteMap.background)
+      function loadSlot(slot, texKey) {
+        if (!spriteMap[slot]) return
+        const sf = spriteFrames[slot]
+        if (sf) {
+          this.load.spritesheet(texKey, spriteMap[slot], { frameWidth: sf.frameWidth, frameHeight: sf.frameHeight })
+        } else {
+          this.load.image(texKey, spriteMap[slot])
+        }
+      }
+      loadSlot.call(this, 'david',      'spr_david')
+      loadSlot.call(this, 'lion',       'spr_lion')
+      loadSlot.call(this, 'sheep',      'spr_sheep')
+      loadSlot.call(this, 'background', 'spr_bg')
     }
 
     // ── create ────────────────────────────────────────────────────────────────
@@ -129,18 +141,46 @@ const ChaseRescue = {
       davidGfx = scene.add.graphics().setDepth(5)
       predGfx  = scene.add.graphics().setDepth(5)
 
-      // Sprite images for characters (when provided)
+      // Sprite objects for characters (when provided via spriteMap slots)
       if (scene.textures.exists('spr_david')) {
-        davidSprite = scene.add.image(DAVID_X, GROUND_Y, 'spr_david')
-          .setOrigin(0.5, 1).setDepth(5).setDisplaySize(52, 80)
+        if (spriteFrames.david) {
+          davidSprite = scene.add.sprite(DAVID_X, GROUND_Y, 'spr_david')
+            .setOrigin(0.5, 1).setDepth(5)
+          scene.anims.create({
+            key:       'chase_david_run',
+            frames:    scene.anims.generateFrameNumbers('spr_david', { start: 0, end: spriteFrames.david.frameCount - 1 }),
+            frameRate: 8,
+            repeat:    -1,
+          })
+          davidSprite.play('chase_david_run')
+          davidIsAnimated = true
+        } else {
+          davidSprite = scene.add.image(DAVID_X, GROUND_Y, 'spr_david')
+            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(52, 80)
+        }
       }
       if (scene.textures.exists('spr_lion')) {
-        lionSprite = scene.add.image(PRED_X, GROUND_Y, 'spr_lion')
-          .setOrigin(0.5, 1).setDepth(5).setDisplaySize(80, 56)
+        if (spriteFrames.lion) {
+          lionSprite = scene.add.sprite(PRED_X, GROUND_Y, 'spr_lion')
+            .setOrigin(0.5, 1).setDepth(5)
+          scene.anims.create({
+            key:       'chase_lion_run',
+            frames:    scene.anims.generateFrameNumbers('spr_lion', { start: 0, end: spriteFrames.lion.frameCount - 1 }),
+            frameRate: 8,
+            repeat:    -1,
+          })
+          lionSprite.play('chase_lion_run')
+          lionIsAnimated = true
+        } else {
+          lionSprite = scene.add.image(PRED_X, GROUND_Y, 'spr_lion')
+            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(80, 56)
+        }
       }
       if (scene.textures.exists('spr_sheep')) {
-        sheepSprite = scene.add.image(PRED_X - 30, GROUND_Y - 30, 'spr_sheep')
-          .setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
+        // Sheep is a static carried prop — show frame 0 if sprite sheet, full image otherwise
+        sheepSprite = spriteFrames.sheep
+          ? scene.add.sprite(PRED_X - 30, GROUND_Y - 30, 'spr_sheep', 0).setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
+          : scene.add.image(PRED_X - 30, GROUND_Y - 30, 'spr_sheep').setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
       }
 
       // Draw initial poses
@@ -326,7 +366,8 @@ const ChaseRescue = {
 
       if (davidSprite) {
         davidSprite.y = davidY
-        davidSprite.setFlipX(animFrame === 1)
+        // Static images: simulate running by alternating flip; animated sheets handle motion themselves
+        if (!davidIsAnimated) davidSprite.setFlipX(animFrame === 1)
         return
       }
 
@@ -384,7 +425,7 @@ const ChaseRescue = {
       predGfx.clear()
 
       if (lionSprite) {
-        lionSprite.setFlipX(animFrame === 1)
+        if (!lionIsAnimated) lionSprite.setFlipX(animFrame === 1)
         if (sheepSprite) {
           // Keep sheep attached near lion's mouth
           sheepSprite.x = PRED_X - 30

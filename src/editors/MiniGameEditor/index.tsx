@@ -65,10 +65,19 @@ const module = {
 export default module
 `
 
-const SDK_SNIPPET = `interface MiniGameContext {
+const SDK_SNIPPET = `interface SpriteFrameInfo {
+  frameWidth: number   // px per frame
+  frameHeight: number
+  frameCount: number   // total frames in sheet
+}
+
+interface MiniGameContext {
   canvas: HTMLCanvasElement
   Phaser: typeof Phaser        // Phaser 3 global
   assets: { id, name, url, type }[]
+  // Sprite slots assigned in the editor:
+  spriteMap: Record<string, string>           // slot → image URL
+  spriteFrames: Record<string, SpriteFrameInfo> // slot → frame info (sprite sheets only)
   variables: Record<string, string|number|boolean>
   onComplete(
     result: 'win'|'lose'|'exit',
@@ -156,7 +165,7 @@ export function MiniGameEditor() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const imageAssets = project.assets.filter((a) => a.type === 'image')
+  const spriteSheets = project.spriteSheets ?? []
 
   const handleAddSlot = () => {
     if (!selected) return
@@ -244,9 +253,17 @@ export function MiniGameEditor() {
     exitBtn.addEventListener('click', teardown)
 
     const spriteMap: Record<string, string> = {}
-    for (const [slot, assetId] of Object.entries(selected.spriteMap ?? {})) {
-      const asset = project.assets.find((a) => a.id === assetId)
-      if (asset?.url) spriteMap[slot] = asset.url
+    const spriteFrames: Record<string, { frameWidth: number; frameHeight: number; frameCount: number }> = {}
+    for (const [slot, ssId] of Object.entries(selected.spriteMap ?? {})) {
+      const ss = (project.spriteSheets ?? []).find((s) => s.id === ssId)
+      if (ss) {
+        spriteMap[slot] = ss.imageUrl
+        spriteFrames[slot] = {
+          frameWidth:  ss.frameWidth,
+          frameHeight: ss.frameHeight,
+          frameCount:  ss.frames.length,
+        }
+      }
     }
 
     const context = {
@@ -254,6 +271,7 @@ export function MiniGameEditor() {
       Phaser: (window as any).Phaser,
       assets: project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
       spriteMap,
+      spriteFrames,
       variables: {},
       onComplete: (_result: string, _vars?: Record<string, unknown>) => {
         teardown()
@@ -419,9 +437,9 @@ export function MiniGameEditor() {
                     onChange={(e) => handleSlotAssetChange(slot, e.target.value)}
                     className="flex-1 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="">— no image —</option>
-                    {imageAssets.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
+                    <option value="">— no sprite —</option>
+                    {spriteSheets.map((ss) => (
+                      <option key={ss.id} value={ss.id}>{ss.name}</option>
                     ))}
                   </select>
                   <button
@@ -433,7 +451,7 @@ export function MiniGameEditor() {
                 </div>
               ))}
               {Object.keys(selected.spriteMap ?? {}).length === 0 && (
-                <p className="text-xs text-gray-600">No sprite slots. Click "+ Add slot" to assign images to character names.</p>
+                <p className="text-xs text-gray-600">No sprite slots. Click "+ Add slot" to assign sprite sheets to character names.</p>
               )}
             </div>
 
@@ -463,6 +481,7 @@ export function MiniGameEditor() {
           </pre>
           <p className="text-gray-500">After the game ends, call <span className="text-indigo-300 font-mono">onComplete</span> with <span className="text-gray-300">'win'</span>, <span className="text-gray-300">'lose'</span>, or <span className="text-gray-300">'exit'</span>. The runtime sets the variable <span className="text-indigo-300 font-mono">minigame_result</span> automatically.</p>
           <p className="text-gray-500">Phaser 3.80.1 is provided via <span className="text-indigo-300 font-mono">ctx.Phaser</span>. Pass <span className="text-indigo-300 font-mono">ctx.canvas</span> to Phaser's config so it renders inside the builder overlay.</p>
+          <p className="text-gray-500">Sprite slots are assigned in the <span className="text-indigo-300 font-mono">Sprite Slots</span> strip above the source editor. Each slot maps to a sprite sheet from the Sprite Library. Use <span className="text-indigo-300 font-mono">ctx.spriteFrames[slot]</span> to detect sprite sheets and load with <span className="text-indigo-300 font-mono">this.load.spritesheet()</span>; fall back to <span className="text-indigo-300 font-mono">this.load.image()</span> when the key is absent.</p>
           <button
             onClick={handleCopySDK}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded w-full justify-center"
