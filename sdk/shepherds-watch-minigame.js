@@ -18,11 +18,11 @@
  *   Four or more sheep are taken by predators.
  *
  * SPRITE SLOTS (optional — assign in the Mini-Games editor):
- *   background  — Pasture background (PNG, full canvas)
- *   sheep       — Sheep sprite       (PNG, ~36×30, origin centre)
- *   lion        — Lion predator      (PNG, ~60×52, origin centre)
- *   bear        — Bear predator      (PNG, ~64×54, origin centre)
- *   david       — David character    (PNG, shown on the result screen)
+ *   background — Pasture background  (PNG, full canvas)
+ *   sheep      — Sheep sprite        (PNG, ~36×30, origin centre)
+ *   lion_run   — Lion running anim   (sprite sheet, origin centre, ~60px tall)
+ *   bear_run   — Bear running anim   (sprite sheet, origin centre, ~54px tall)
+ *   david      — David character     (PNG, shown on the result screen)
  *
  * All slots fall back to procedural Phaser Graphics if no image is assigned.
  */
@@ -84,28 +84,26 @@ const ShepherdsWatch = {
 
     function preload() {
       function loadSlot(slot, texKey) {
-        if (!spriteMap[slot]) return
         const sf = spriteFrames[slot]
         if (sf) {
-          this.load.spritesheet(texKey, spriteMap[slot], { frameWidth: sf.frameWidth, frameHeight: sf.frameHeight })
-        } else {
+          this.load.spritesheet(texKey, sf.url, { frameWidth: sf.frameWidth, frameHeight: sf.frameHeight })
+        } else if (spriteMap[slot]) {
           this.load.image(texKey, spriteMap[slot])
         }
       }
-      // Background is always a full image regardless of frame info
-      if (spriteMap.background) this.load.image('spr_bg', spriteMap.background)
-      loadSlot.call(this, 'sheep',  'spr_sheep')
-      loadSlot.call(this, 'lion',   'spr_lion')
-      loadSlot.call(this, 'bear',   'spr_bear')
-      loadSlot.call(this, 'david',  'spr_david')
+      if (spriteMap.background) this.load.image('tex_bg',    spriteMap.background)
+      loadSlot.call(this, 'sheep',    'tex_sheep')
+      loadSlot.call(this, 'lion_run', 'tex_lion_run')
+      loadSlot.call(this, 'bear_run', 'tex_bear_run')
+      loadSlot.call(this, 'david',    'tex_david')
     }
 
     // ── create ─────────────────────────────────────────────────────────────────
     function create() {
       const scene = this
 
-      if (scene.textures.exists('spr_bg')) {
-        scene.add.image(W / 2, H / 2, 'spr_bg').setDisplaySize(W, H).setDepth(0)
+      if (scene.textures.exists('tex_bg')) {
+        scene.add.image(W / 2, H / 2, 'tex_bg').setDisplaySize(W, H).setDepth(0)
       } else {
         drawPasture(scene)
       }
@@ -159,11 +157,11 @@ const ShepherdsWatch = {
     }
 
     function makeSheep(scene, x, y) {
-      if (scene.textures.exists('spr_sheep')) {
+      if (scene.textures.exists('tex_sheep')) {
         // Sheep are static props — show frame 0 if sprite sheet, full image otherwise
         return spriteFrames.sheep
-          ? scene.add.sprite(x, y, 'spr_sheep', 0).setDisplaySize(36, 30).setDepth(3)
-          : scene.add.image(x, y, 'spr_sheep').setDisplaySize(36, 30).setDepth(3)
+          ? scene.add.sprite(x, y, 'tex_sheep', 0).setDisplaySize(36, 30).setDepth(3)
+          : scene.add.image(x, y, 'tex_sheep').setDisplaySize(36, 30).setDepth(3)
       }
       const g = scene.add.graphics().setDepth(3)
       drawSheepAt(g, x, y)
@@ -243,28 +241,28 @@ const ShepherdsWatch = {
     }
 
     function makePredator(scene, type, x, y) {
-      const sprKey = type === 'lion' ? 'spr_lion' : 'spr_bear'
-      const sfKey  = type  // 'lion' | 'bear'
-      const w = type === 'lion' ? 60 : 64
-      const h = type === 'lion' ? 52 : 54
-      if (scene.textures.exists(sprKey)) {
-        if (spriteFrames[sfKey]) {
-          const animKey = `watch_${sfKey}_run`
+      const slotKey = type === 'lion' ? 'lion_run' : 'bear_run'
+      const texKey  = type === 'lion' ? 'tex_lion_run' : 'tex_bear_run'
+      const sfInfo  = spriteFrames[slotKey]
+      const displayH = type === 'lion' ? 52 : 54
+      if (scene.textures.exists(texKey)) {
+        if (sfInfo) {
+          const animKey = `watch_${type}_run`
           if (!scene.anims.exists(animKey)) {
             scene.anims.create({
               key:       animKey,
-              frames:    scene.anims.generateFrameNumbers(sprKey, { start: 0, end: spriteFrames[sfKey].frameCount - 1 }),
-              frameRate: 8,
-              repeat:    -1,
+              frames:    scene.anims.generateFrameNumbers(texKey, { start: sfInfo.startFrame, end: sfInfo.endFrame }),
+              frameRate: sfInfo.frameRate || 8,
+              repeat:    sfInfo.loop ? -1 : 0,
             })
           }
-          return scene.add.sprite(x, y, sprKey)
-            .setDisplaySize(w, h)
+          return scene.add.sprite(x, y, texKey)
+            .setScale(displayH / sfInfo.frameHeight)
             .setInteractive({ cursor: 'pointer' })
             .play(animKey)
         }
-        return scene.add.image(x, y, sprKey)
-          .setDisplaySize(w, h)
+        return scene.add.image(x, y, texKey)
+          .setDisplaySize(type === 'lion' ? 60 : 64, displayH)
           .setInteractive({ cursor: 'pointer' })
       }
       const g = scene.add.graphics()
@@ -629,8 +627,8 @@ const ShepherdsWatch = {
         }).setOrigin(0.5).setDepth(13)
 
       // David sprite on result screen if provided
-      if (scene.textures.exists('spr_david')) {
-        scene.add.image(cx + W * 0.26, cy + H * 0.04, 'spr_david')
+      if (scene.textures.exists('tex_david')) {
+        scene.add.image(cx + W * 0.26, cy + H * 0.04, 'tex_david')
           .setDisplaySize(56, 88).setDepth(13)
       }
 
