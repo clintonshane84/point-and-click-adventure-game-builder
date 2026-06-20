@@ -16,6 +16,14 @@
  *
  * LOSE CONDITIONS:
  *   The lion reaches its den (22 seconds), OR the gap becomes too large (you fall too far behind).
+ *
+ * SPRITE SLOTS (optional — assign in the Mini-Games editor):
+ *   david      — David running sprite (PNG, origin bottom-centre)
+ *   lion       — Lion running sprite  (PNG, origin bottom-centre)
+ *   sheep      — Sheep sprite         (PNG, origin centre) — displayed in lion's mouth
+ *   background — Scene background     (PNG, full canvas)
+ *
+ * All slots fall back to procedural Phaser Graphics if no image is assigned.
  */
 
 /** @type {import('./minigame-sdk').MiniGameModule} */
@@ -25,6 +33,7 @@ const ChaseRescue = {
 
   launch(ctx) {
     const { canvas, Phaser, onComplete } = ctx
+    const spriteMap = ctx.spriteMap || {}
 
     const W = canvas.width  || 800
     const H = canvas.height || 600
@@ -69,6 +78,11 @@ const ChaseRescue = {
     // Character graphics (cleared + redrawn each frame)
     let davidGfx, predGfx
 
+    // Sprite image objects (set in create() when spriteMap slots are provided)
+    let davidSprite = null
+    let lionSprite  = null
+    let sheepSprite = null
+
     // Mid-ground tree objects (scrolling parallax)
     const bgTrees = []
 
@@ -89,13 +103,24 @@ const ChaseRescue = {
       scene: { preload, create, update },
     }
 
-    function preload() { /* all graphics procedural */ }
+    function preload() {
+      if (spriteMap.david)      this.load.image('spr_david', spriteMap.david)
+      if (spriteMap.lion)       this.load.image('spr_lion',  spriteMap.lion)
+      if (spriteMap.sheep)      this.load.image('spr_sheep', spriteMap.sheep)
+      if (spriteMap.background) this.load.image('spr_bg',    spriteMap.background)
+    }
 
     // ── create ────────────────────────────────────────────────────────────────
     function create() {
       const scene = this
 
-      drawBackground(scene)
+      // Background — sprite or procedural
+      if (scene.textures.exists('spr_bg')) {
+        scene.add.image(W / 2, H / 2, 'spr_bg').setDisplaySize(W, H).setDepth(0)
+      } else {
+        drawBackground(scene)
+      }
+
       createBgTrees(scene)
       drawDenCave(scene)
       drawGround(scene)
@@ -103,6 +128,20 @@ const ChaseRescue = {
       // Dynamic character graphics (depth 5 so they appear above ground/trees)
       davidGfx = scene.add.graphics().setDepth(5)
       predGfx  = scene.add.graphics().setDepth(5)
+
+      // Sprite images for characters (when provided)
+      if (scene.textures.exists('spr_david')) {
+        davidSprite = scene.add.image(DAVID_X, GROUND_Y, 'spr_david')
+          .setOrigin(0.5, 1).setDepth(5).setDisplaySize(52, 80)
+      }
+      if (scene.textures.exists('spr_lion')) {
+        lionSprite = scene.add.image(PRED_X, GROUND_Y, 'spr_lion')
+          .setOrigin(0.5, 1).setDepth(5).setDisplaySize(80, 56)
+      }
+      if (scene.textures.exists('spr_sheep')) {
+        sheepSprite = scene.add.image(PRED_X - 30, GROUND_Y - 30, 'spr_sheep')
+          .setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
+      }
 
       // Draw initial poses
       drawDavid(scene)
@@ -285,6 +324,12 @@ const ChaseRescue = {
     function drawDavid(scene) {
       davidGfx.clear()
 
+      if (davidSprite) {
+        davidSprite.y = davidY
+        davidSprite.setFlipX(animFrame === 1)
+        return
+      }
+
       const x = DAVID_X
       const y = davidY
       const f = animFrame  // 0 or 1
@@ -338,6 +383,16 @@ const ChaseRescue = {
     function drawPredator(scene) {
       predGfx.clear()
 
+      if (lionSprite) {
+        lionSprite.setFlipX(animFrame === 1)
+        if (sheepSprite) {
+          // Keep sheep attached near lion's mouth
+          sheepSprite.x = PRED_X - 30
+          sheepSprite.y = GROUND_Y - 30
+        }
+        return
+      }
+
       const x = PRED_X
       const y = GROUND_Y
       const f = animFrame
@@ -346,15 +401,20 @@ const ChaseRescue = {
       predGfx.fillStyle(0x000000, 0.18)
       predGfx.fillEllipse(x, y + 2, 60, 10)
 
-      // Sheep (dangling from mouth)
-      predGfx.fillStyle(0xeeeeee, 1)
-      predGfx.fillCircle(x - 28, y - 28, 10)
-      predGfx.fillStyle(0xc8956a, 0.9)
-      predGfx.fillCircle(x - 35, y - 22, 5)   // sheep head
-      // Wool texture
-      predGfx.fillStyle(0xdddddd, 0.7)
-      predGfx.fillCircle(x - 24, y - 33, 6)
-      predGfx.fillCircle(x - 32, y - 30, 5)
+      // Sheep (dangling from mouth) — procedural only when no sheep sprite
+      if (!sheepSprite) {
+        predGfx.fillStyle(0xeeeeee, 1)
+        predGfx.fillCircle(x - 28, y - 28, 10)
+        predGfx.fillStyle(0xc8956a, 0.9)
+        predGfx.fillCircle(x - 35, y - 22, 5)   // sheep head
+        // Wool texture
+        predGfx.fillStyle(0xdddddd, 0.7)
+        predGfx.fillCircle(x - 24, y - 33, 6)
+        predGfx.fillCircle(x - 32, y - 30, 5)
+      } else {
+        sheepSprite.x = x - 30
+        sheepSprite.y = y - 30
+      }
 
       // Legs
       predGfx.lineStyle(5, 0x8a5a00, 1)

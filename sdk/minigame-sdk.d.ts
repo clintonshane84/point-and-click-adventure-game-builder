@@ -24,6 +24,13 @@ export interface MiniGameContext {
   /** Project assets (images, sounds, videos) available to the mini-game. */
   assets: MiniGameAsset[]
 
+  /**
+   * Resolved sprite map: slotName → asset URL.
+   * Slots are configured in the Mini-Game editor. If no asset is assigned to a slot, the key will be absent.
+   * Example slots used by the Chase & Rescue game: 'david', 'lion', 'sheep', 'background'.
+   */
+  spriteMap: Record<string, string>
+
   /** Current game variables at the time the mini-game was launched. Read-only — changes are not reflected back unless passed to onComplete. */
   variables: Record<string, string | number | boolean>
 

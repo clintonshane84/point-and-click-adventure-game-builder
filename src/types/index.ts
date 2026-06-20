@@ -354,6 +354,7 @@ export interface MiniGame {
   name: string
   description: string
   source: string        // full JS module source (ES module with default export)
+  spriteMap?: Record<string, string>  // slotName → assetId
 }
 
 // Cinematic types

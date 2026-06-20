@@ -1543,10 +1543,17 @@ export class GameRuntime {
         this.renderLoop()
       }
 
+      const spriteMap: Record<string, string> = {}
+      for (const [slot, assetId] of Object.entries(mg.spriteMap ?? {})) {
+        const asset = this.project.assets.find((a) => a.id === assetId)
+        if (asset?.url) spriteMap[slot] = asset.url
+      }
+
       const context = {
         canvas,
         Phaser: (window as any).Phaser,
         assets: this.project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
+        spriteMap,
         variables: { ...this.state.variables },
         onComplete: (result: 'win' | 'lose' | 'exit', updatedVars?: Record<string, string | number | boolean>) => {
           teardown(result, updatedVars)

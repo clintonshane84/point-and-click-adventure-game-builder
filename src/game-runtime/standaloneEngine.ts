@@ -945,10 +945,16 @@ export class GameEngine {
         this.lastFrameTime=0;
         this._loop();
       };
+      const spriteMap={};
+      for(const [slot,assetId] of Object.entries(mg.spriteMap||{})){
+        const asset=(this.project.assets||[]).find(a=>a.id===assetId);
+        if(asset?.url) spriteMap[slot]=asset.url;
+      }
       const context={
         canvas,
         Phaser:window.Phaser,
         assets:(this.project.assets||[]).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type})),
+        spriteMap,
         variables:{...this.state.variables},
         onComplete:(result,updatedVars)=>teardown(result,updatedVars),
       };

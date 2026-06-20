@@ -154,6 +154,37 @@ export function MiniGameEditor() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const imageAssets = project.assets.filter((a) => a.type === 'image')
+
+  const handleAddSlot = () => {
+    if (!selected) return
+    const map = { ...(selected.spriteMap ?? {}) }
+    const key = `slot${Object.keys(map).length + 1}`
+    map[key] = ''
+    updateMiniGame(selected.id, { spriteMap: map })
+  }
+
+  const handleSlotNameChange = (oldKey: string, newKey: string) => {
+    if (!selected) return
+    const map = { ...(selected.spriteMap ?? {}) }
+    const val = map[oldKey]
+    delete map[oldKey]
+    map[newKey] = val ?? ''
+    updateMiniGame(selected.id, { spriteMap: map })
+  }
+
+  const handleSlotAssetChange = (key: string, assetId: string) => {
+    if (!selected) return
+    updateMiniGame(selected.id, { spriteMap: { ...(selected.spriteMap ?? {}), [key]: assetId } })
+  }
+
+  const handleRemoveSlot = (key: string) => {
+    if (!selected) return
+    const map = { ...(selected.spriteMap ?? {}) }
+    delete map[key]
+    updateMiniGame(selected.id, { spriteMap: map })
+  }
+
   const handleTestLaunch = async () => {
     if (!selected?.source) return
     setTestActive(true)
@@ -210,10 +241,17 @@ export function MiniGameEditor() {
 
     exitBtn.addEventListener('click', teardown)
 
+    const spriteMap: Record<string, string> = {}
+    for (const [slot, assetId] of Object.entries(selected.spriteMap ?? {})) {
+      const asset = project.assets.find((a) => a.id === assetId)
+      if (asset?.url) spriteMap[slot] = asset.url
+    }
+
     const context = {
       canvas,
       Phaser: (window as any).Phaser,
       assets: project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
+      spriteMap,
       variables: {},
       onComplete: (_result: string, _vars?: Record<string, unknown>) => {
         teardown()
@@ -353,6 +391,48 @@ export function MiniGameEditor() {
               >
                 <Gamepad2 size={13} /> Test Launch
               </button>
+            </div>
+
+            {/* Sprite Slots */}
+            <div className="px-4 py-2 bg-gray-850 border-b border-gray-700">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Sprite Slots</span>
+                <button
+                  onClick={handleAddSlot}
+                  className="text-xs text-indigo-400 hover:text-indigo-200"
+                >
+                  + Add slot
+                </button>
+              </div>
+              {Object.entries(selected.spriteMap ?? {}).map(([slot, assetId]) => (
+                <div key={slot} className="flex items-center gap-2 mb-1">
+                  <input
+                    value={slot}
+                    onChange={(e) => handleSlotNameChange(slot, e.target.value)}
+                    placeholder="slot name"
+                    className="w-24 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
+                  />
+                  <select
+                    value={assetId}
+                    onChange={(e) => handleSlotAssetChange(slot, e.target.value)}
+                    className="flex-1 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— no image —</option>
+                    {imageAssets.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleRemoveSlot(slot)}
+                    className="text-gray-500 hover:text-red-400 text-base leading-none shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {Object.keys(selected.spriteMap ?? {}).length === 0 && (
+                <p className="text-xs text-gray-600">No sprite slots. Click "+ Add slot" to assign images to character names.</p>
+              )}
             </div>
 
             {/* Source textarea */}
