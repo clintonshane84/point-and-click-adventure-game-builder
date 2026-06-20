@@ -147,7 +147,7 @@ const ChaseRescue = {
         if (!scene.textures.exists(texKey)) return null
         if (sfInfo) {
           const spr = scene.add.sprite(x, y, texKey)
-            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(displayW, displayH)
+            .setOrigin(0.5, 1).setDepth(5).setScale(displayH / sfInfo.frameHeight)
           scene.anims.create({
             key:       animKey,
             frames:    scene.anims.generateFrameNumbers(texKey, { start: sfInfo.startFrame, end: sfInfo.endFrame }),
