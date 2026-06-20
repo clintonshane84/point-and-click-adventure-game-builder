@@ -4,6 +4,7 @@ import stonethrowSource from '../../../sdk/stone-throw-minigame.js?raw'
 import harpSource       from '../../../sdk/harp-minigame.js?raw'
 import exampleSource    from '../../../sdk/example-minigame.js?raw'
 import chaseSource      from '../../../sdk/chase-rescue-minigame.js?raw'
+import shepherdSource   from '../../../sdk/shepherds-watch-minigame.js?raw'
 import { useGameStore } from '../../store/useGameStore'
 import type { MiniGame } from '../../types'
 
@@ -88,10 +89,11 @@ export default { name, version, launch }
 `
 
 const SDK_LIBRARY = [
-  { label: 'David vs Goliath — Stone Throw',    source: stonethrowSource },
-  { label: 'Harp of David — Heal the King',     source: harpSource },
-  { label: 'Chase & Rescue — David and the Lion', source: chaseSource },
-  { label: 'Example: Click the Target',          source: exampleSource },
+  { label: 'David vs Goliath — Stone Throw',        source: stonethrowSource },
+  { label: 'Harp of David — Heal the King',         source: harpSource },
+  { label: 'Chase & Rescue — David and the Lion',   source: chaseSource },
+  { label: "Shepherd's Watch — Guard the Flock",    source: shepherdSource },
+  { label: 'Example: Click the Target',             source: exampleSource },
 ]
 
 export function MiniGameEditor() {
