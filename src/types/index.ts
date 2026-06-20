@@ -147,7 +147,7 @@ export interface Scene {
 }
 
 // Event types
-export type TriggerType = 'click' | 'hover' | 'enter' | 'exit' | 'keypress'
+export type TriggerType = 'click' | 'hover' | 'enter' | 'exit' | 'keypress' | 'stage_start' | 'game_start'
 
 export type ActionType =
   | 'navigate_scene'
@@ -175,6 +175,7 @@ export interface EventTrigger {
   id: string
   sceneId: string
   objectId: string
+  stageId?: string     // set for stage_start events; empty for scene-object and game_start events
   trigger: TriggerType
   actions: EventAction[]
   enabled: boolean

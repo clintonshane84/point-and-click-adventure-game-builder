@@ -132,6 +132,8 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
+    const gameStartEvs=(this.project.events||[]).filter(e=>e.trigger==='game_start'&&e.enabled);
+    gameStartEvs.forEach(e=>this._execEvent(e));
     this._initStageForScene(this.state.currentSceneId);
     if(this.state.showTitleScreen){
       const ts=this.project.titleScreen;
@@ -150,6 +152,8 @@ export class GameEngine {
       const val=v.type==='number'?(Number(v.defaultValue)||0):v.type==='boolean'?(v.defaultValue==='true'):v.defaultValue;
       this.state.variables[v.name]=val;
     }
+    const stageStartEvs=(this.project.events||[]).filter(e=>e.trigger==='stage_start'&&e.stageId===stage.id&&e.enabled);
+    stageStartEvs.forEach(e=>this._execEvent(e));
   }
 
   _evaluateGoals() {

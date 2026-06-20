@@ -127,6 +127,9 @@ export class GameRuntime {
     this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
+    // Fire game_start events before the first scene loads
+    const gameStartEvents = (this.project.events ?? []).filter((e) => e.trigger === 'game_start' && e.enabled)
+    gameStartEvents.forEach((e) => this.executeEvent(e))
     this.initStageForScene(this.state.currentSceneId)
     if (this.state.showTitleScreen) {
       const ts = this.project.titleScreen
@@ -153,6 +156,11 @@ export class GameRuntime {
                 : v.defaultValue
       this.state.variables[v.name] = val
     }
+    // Fire stage_start events for this stage
+    const stageStartEvents = (this.project.events ?? []).filter(
+      (e) => e.trigger === 'stage_start' && e.stageId === stage.id && e.enabled
+    )
+    stageStartEvents.forEach((e) => this.executeEvent(e))
   }
 
   // ── Goal evaluation ───────────────────────────────────────────────────────
