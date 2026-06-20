@@ -1,5 +1,8 @@
 import { useState, useRef } from 'react'
-import { Plus, Trash2, Gamepad2, Upload, Copy, Check } from 'lucide-react'
+import { Plus, Trash2, Gamepad2, Upload, Copy, Check, BookOpen } from 'lucide-react'
+import stonethrowSource from '../../../sdk/stone-throw-minigame.js?raw'
+import harpSource       from '../../../sdk/harp-minigame.js?raw'
+import exampleSource    from '../../../sdk/example-minigame.js?raw'
 import { useGameStore } from '../../store/useGameStore'
 import type { MiniGame } from '../../types'
 
@@ -83,6 +86,12 @@ interface MiniGameModule {
 export default { name, version, launch }
 `
 
+const SDK_LIBRARY = [
+  { label: 'David vs Goliath — Stone Throw', source: stonethrowSource },
+  { label: 'Harp of David — Heal the King',  source: harpSource },
+  { label: 'Example: Click the Target',       source: exampleSource },
+]
+
 export function MiniGameEditor() {
   const { project, addMiniGame, updateMiniGame, deleteMiniGame } = useGameStore()
   const miniGames = project.miniGames ?? []
@@ -90,6 +99,7 @@ export function MiniGameEditor() {
   const [selectedId, setSelectedId] = useState<string | null>(miniGames[0]?.id ?? null)
   const [copied, setCopied] = useState(false)
   const [testActive, setTestActive] = useState(false)
+  const [showLibrary, setShowLibrary] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const instanceRef = useRef<{ destroy(): void } | null>(null)
 
@@ -101,6 +111,19 @@ export function MiniGameEditor() {
       name: 'New Mini-Game',
       description: '',
       source: STARTER_SOURCE,
+    }
+    addMiniGame(mg)
+    setSelectedId(mg.id)
+  }
+
+  const handleAddFromLibrary = (source: string) => {
+    setShowLibrary(false)
+    const match = source.match(/name:\s*['"`](.+?)['"`]/)
+    const mg: MiniGame = {
+      id: `minigame-${Date.now()}`,
+      name: match?.[1] ?? 'SDK Mini-Game',
+      description: '',
+      source,
     }
     addMiniGame(mg)
     setSelectedId(mg.id)
@@ -209,13 +232,50 @@ export function MiniGameEditor() {
       <div className="w-52 bg-gray-800 border-r border-gray-700 flex flex-col">
         <div className="px-3 py-3 border-b border-gray-700 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-200">Mini-Games</span>
-          <button
-            onClick={handleAdd}
-            className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
-            title="Add Mini-Game"
-          >
-            <Plus size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Library picker */}
+            <div
+              className="relative"
+              tabIndex={-1}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setShowLibrary(false)
+                }
+              }}
+            >
+              <button
+                onClick={() => setShowLibrary((v) => !v)}
+                className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                title="Add from SDK library"
+              >
+                <BookOpen size={16} />
+              </button>
+              {showLibrary && (
+                <div className="absolute left-0 top-7 z-20 bg-gray-900 border border-gray-700 rounded shadow-lg w-64 py-1">
+                  <p className="px-3 py-1 text-xs text-gray-500 font-semibold uppercase tracking-wide">
+                    SDK Games
+                  </p>
+                  {SDK_LIBRARY.map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => handleAddFromLibrary(item.source)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Blank new game */}
+            <button
+              onClick={handleAdd}
+              className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+              title="Add blank mini-game"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto py-1">
           {miniGames.length === 0 && (
