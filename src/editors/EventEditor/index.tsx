@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, Trash2, Zap, ChevronDown, ChevronUp } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { EventTrigger, EventAction, TriggerType, ActionType } from '../../types'
+import type { EventTrigger, EventAction, TriggerType, ActionType, FacingDirection } from '../../types'
 
 const TRIGGER_LABELS: Record<TriggerType, string> = {
   click: 'Click',
@@ -29,17 +29,19 @@ const ACTION_LABELS: Record<ActionType, string> = {
   play_animation: 'Play Animation',
   stop_animation: 'Stop Animation',
   play_cinematic: 'Play Cinematic',
+  launch_minigame: 'Launch Mini-Game',
 }
 
 interface EventFormState {
   trigger: TriggerType
-  actions: Array<{ type: ActionType; value: string }>
+  actions: Array<Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing'>>
 }
 
 export function EventEditor() {
   const { project, addEvent, updateEvent, deleteEvent } = useGameStore()
   const { scenes, events } = project
   const cinematics = project.cinematics ?? []
+  const miniGames = project.miniGames ?? []
 
   const [selectedSceneId, setSelectedSceneId] = useState(scenes[0]?.id ?? '')
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
@@ -79,6 +81,9 @@ export function EventEditor() {
         id: `action-${Date.now()}-${i}`,
         type: a.type,
         value: a.value,
+        ...(a.entryX != null ? { entryX: a.entryX } : {}),
+        ...(a.entryY != null ? { entryY: a.entryY } : {}),
+        ...(a.entryFacing ? { entryFacing: a.entryFacing } : {}),
       })),
       enabled: true,
     }
@@ -327,7 +332,7 @@ export function EventEditor() {
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </select>
-                    ) : action.type === 'navigate_scene' ? (
+                    ) : action.type === 'launch_minigame' ? (
                       <select
                         value={action.value}
                         onChange={(e) => {
@@ -337,11 +342,79 @@ export function EventEditor() {
                         }}
                         className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
                       >
-                        <option value="">— select scene —</option>
-                        {scenes.map((s) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
+                        <option value="">— select mini-game —</option>
+                        {miniGames.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </select>
+                    ) : action.type === 'navigate_scene' ? (
+                      <div className="space-y-1.5">
+                        <select
+                          value={action.value}
+                          onChange={(e) => {
+                            const updated = [...form.actions]
+                            updated[idx] = { ...updated[idx], value: e.target.value }
+                            setForm((f) => ({ ...f, actions: updated }))
+                          }}
+                          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="">— select scene —</option>
+                          {scenes.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                        <div className="border border-gray-600 rounded p-2 bg-gray-800 space-y-1.5">
+                          <p className="text-xs text-gray-400 font-medium">Arrival Position <span className="text-gray-500 font-normal">— where the hero appears in the destination scene</span></p>
+                          <div className="flex gap-2">
+                            <label className="flex items-center gap-1 flex-1 text-xs text-gray-400">
+                              X
+                              <input
+                                type="number"
+                                placeholder="—"
+                                value={action.entryX ?? ''}
+                                onChange={(e) => {
+                                  const updated = [...form.actions]
+                                  const val = e.target.value === '' ? undefined : Number(e.target.value)
+                                  updated[idx] = { ...updated[idx], entryX: val }
+                                  setForm((f) => ({ ...f, actions: updated }))
+                                }}
+                                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 w-0"
+                              />
+                            </label>
+                            <label className="flex items-center gap-1 flex-1 text-xs text-gray-400">
+                              Y
+                              <input
+                                type="number"
+                                placeholder="—"
+                                value={action.entryY ?? ''}
+                                onChange={(e) => {
+                                  const updated = [...form.actions]
+                                  const val = e.target.value === '' ? undefined : Number(e.target.value)
+                                  updated[idx] = { ...updated[idx], entryY: val }
+                                  setForm((f) => ({ ...f, actions: updated }))
+                                }}
+                                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 w-0"
+                              />
+                            </label>
+                            <select
+                              value={action.entryFacing ?? ''}
+                              onChange={(e) => {
+                                const updated = [...form.actions]
+                                const val = e.target.value as FacingDirection | ''
+                                updated[idx] = { ...updated[idx], entryFacing: val || undefined }
+                                setForm((f) => ({ ...f, actions: updated }))
+                              }}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                            >
+                              <option value="">facing —</option>
+                              <option value="down">↓ down</option>
+                              <option value="up">↑ up</option>
+                              <option value="left">← left</option>
+                              <option value="right">→ right</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
                       <input
                         type="text"

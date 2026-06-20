@@ -821,6 +821,65 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
     ),
   },
 
+  minigame: {
+    title: 'Mini-Game Editor',
+    content: (
+      <>
+        <P>
+          The Mini-Game Editor lets you add external Phaser 3 mini-games to your project.
+          Each mini-game is a standalone <Code>.js</Code> ES module that conforms to the
+          <Code>MiniGameModule</Code> interface — paste the source or upload a file, then
+          trigger it from any scene event via the <strong>Launch Mini-Game</strong> action.
+        </P>
+
+        {H('Interface contract')}
+        <P>
+          Your module&apos;s default export must be an object with:
+        </P>
+        <Ul>
+          <Li><Code>name</Code> — display name shown in the editor.</Li>
+          <Li><Code>version</Code> — semantic version string.</Li>
+          <Li><Code>launch(ctx)</Code> — starts the game; returns <Code>{'{ destroy() }'}</Code>.</Li>
+        </Ul>
+        <P>
+          The builder passes a <Code>MiniGameContext</Code> to <Code>launch()</Code> containing:
+          <Code>canvas</Code>, <Code>Phaser</Code>, <Code>assets</Code>, <Code>variables</Code>,
+          and <Code>onComplete</Code>.
+        </P>
+
+        {H('Completing a mini-game')}
+        <P>
+          Call <Code>ctx.onComplete('win' | 'lose' | 'exit', optionalVars)</Code> to finish.
+          The runtime sets the variable <Code>minigame_result</Code> automatically.
+          Additional key/value pairs in <Code>optionalVars</Code> are merged into the game state.
+        </P>
+
+        {H('Test Launch')}
+        <P>
+          Click <strong>Test Launch</strong> in the editor header to run the mini-game immediately
+          in a fullscreen overlay — no need to wire up an event first. Click ✕ Exit or call
+          <Code>onComplete</Code> to return.
+        </P>
+
+        {H('SDK')}
+        <P>
+          The <Code>sdk/</Code> directory at the root of the project contains:
+        </P>
+        <Ul>
+          <Li><Code>minigame-sdk.d.ts</Code> — TypeScript interface definitions.</Li>
+          <Li><Code>example-minigame.js</Code> — fully-commented "Click the Target" example.</Li>
+          <Li><Code>README.md</Code> — developer guide.</Li>
+        </Ul>
+
+        <Tip>
+          Always pass <Code>ctx.canvas</Code> to Phaser&apos;s config as <Code>canvas</Code> —
+          never create a new canvas. Call <Code>game.destroy(false)</Code> in <Code>destroy()</Code>
+          to avoid removing the canvas element from the DOM.
+        </Tip>
+      </>
+    ),
+  },
+
   export: {
     title: 'Export Game',
     content: (
