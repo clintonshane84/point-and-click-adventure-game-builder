@@ -143,10 +143,11 @@ const ChaseRescue = {
       predGfx  = scene.add.graphics().setDepth(5)
 
       // Sprite objects for characters (when provided via spriteMap slots)
-      function makeAnimSprite(texKey, animKey, sfInfo, x, y, fallbackW, fallbackH) {
+      function makeAnimSprite(texKey, animKey, sfInfo, x, y, displayW, displayH) {
         if (!scene.textures.exists(texKey)) return null
         if (sfInfo) {
-          const spr = scene.add.sprite(x, y, texKey).setOrigin(0.5, 1).setDepth(5)
+          const spr = scene.add.sprite(x, y, texKey)
+            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(displayW, displayH)
           scene.anims.create({
             key:       animKey,
             frames:    scene.anims.generateFrameNumbers(texKey, { start: sfInfo.startFrame, end: sfInfo.endFrame }),
@@ -157,7 +158,7 @@ const ChaseRescue = {
           return spr
         } else {
           return scene.add.image(x, y, texKey)
-            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(fallbackW, fallbackH)
+            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(displayW, displayH)
         }
       }
 
