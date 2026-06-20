@@ -18,11 +18,13 @@
  *   The lion reaches its den (22 seconds), OR the gap becomes too large (you fall too far behind).
  *
  * SPRITE SLOTS (optional — assign in the Mini-Games editor):
- *   david      — David running sprite (PNG, origin bottom-centre)
- *   lion       — Lion running sprite  (PNG, origin bottom-centre)
- *   sheep      — Sheep sprite         (PNG, origin centre) — displayed in lion's mouth
- *   background — Scene background     (PNG, full canvas)
+ *   david_run  — David running animation  (sprite sheet, origin bottom-centre)
+ *   david_jump — David jumping animation  (sprite sheet, origin bottom-centre)
+ *   lion_run   — Lion running animation   (sprite sheet, origin bottom-centre)
+ *   sheep      — Sheep sprite             (PNG or sheet, origin centre) — displayed in lion's mouth
+ *   background — Scene background         (PNG, full canvas)
  *
+ * Each slot may point to a different named animation on the same or different sprite sheets.
  * All slots fall back to procedural Phaser Graphics if no image is assigned.
  */
 
@@ -80,11 +82,10 @@ const ChaseRescue = {
     let davidGfx, predGfx
 
     // Sprite objects (set in create() when spriteMap slots are provided)
-    let davidSprite     = null
-    let lionSprite      = null
+    let davidRunSprite  = null   // visible when grounded
+    let davidJumpSprite = null   // visible when airborne
+    let lionRunSprite   = null
     let sheepSprite     = null
-    let davidIsAnimated = false   // true when backed by a multi-frame sprite sheet
-    let lionIsAnimated  = false
 
     // Mid-ground tree objects (scrolling parallax)
     const bgTrees = []
@@ -108,18 +109,18 @@ const ChaseRescue = {
 
     function preload() {
       function loadSlot(slot, texKey) {
-        if (!spriteMap[slot]) return
         const sf = spriteFrames[slot]
         if (sf) {
-          this.load.spritesheet(texKey, spriteMap[slot], { frameWidth: sf.frameWidth, frameHeight: sf.frameHeight })
-        } else {
+          this.load.spritesheet(texKey, sf.url, { frameWidth: sf.frameWidth, frameHeight: sf.frameHeight })
+        } else if (spriteMap[slot]) {
           this.load.image(texKey, spriteMap[slot])
         }
       }
-      loadSlot.call(this, 'david',      'spr_david')
-      loadSlot.call(this, 'lion',       'spr_lion')
-      loadSlot.call(this, 'sheep',      'spr_sheep')
-      loadSlot.call(this, 'background', 'spr_bg')
+      loadSlot.call(this, 'david_run',  'tex_david_run')
+      loadSlot.call(this, 'david_jump', 'tex_david_jump')
+      loadSlot.call(this, 'lion_run',   'tex_lion_run')
+      loadSlot.call(this, 'sheep',      'tex_sheep')
+      loadSlot.call(this, 'background', 'tex_bg')
     }
 
     // ── create ────────────────────────────────────────────────────────────────
@@ -127,8 +128,8 @@ const ChaseRescue = {
       const scene = this
 
       // Background — sprite or procedural
-      if (scene.textures.exists('spr_bg')) {
-        scene.add.image(W / 2, H / 2, 'spr_bg').setDisplaySize(W, H).setDepth(0)
+      if (scene.textures.exists('tex_bg')) {
+        scene.add.image(W / 2, H / 2, 'tex_bg').setDisplaySize(W, H).setDepth(0)
       } else {
         drawBackground(scene)
       }
@@ -142,45 +143,36 @@ const ChaseRescue = {
       predGfx  = scene.add.graphics().setDepth(5)
 
       // Sprite objects for characters (when provided via spriteMap slots)
-      if (scene.textures.exists('spr_david')) {
-        if (spriteFrames.david) {
-          davidSprite = scene.add.sprite(DAVID_X, GROUND_Y, 'spr_david')
-            .setOrigin(0.5, 1).setDepth(5)
+      function makeAnimSprite(texKey, animKey, sfInfo, x, y, fallbackW, fallbackH) {
+        if (!scene.textures.exists(texKey)) return null
+        if (sfInfo) {
+          const spr = scene.add.sprite(x, y, texKey).setOrigin(0.5, 1).setDepth(5)
           scene.anims.create({
-            key:       'chase_david_run',
-            frames:    scene.anims.generateFrameNumbers('spr_david', { start: 0, end: spriteFrames.david.frameCount - 1 }),
-            frameRate: 8,
-            repeat:    -1,
+            key:       animKey,
+            frames:    scene.anims.generateFrameNumbers(texKey, { start: sfInfo.startFrame, end: sfInfo.endFrame }),
+            frameRate: sfInfo.frameRate || 8,
+            repeat:    sfInfo.loop ? -1 : 0,
           })
-          davidSprite.play('chase_david_run')
-          davidIsAnimated = true
+          spr.play(animKey)
+          return spr
         } else {
-          davidSprite = scene.add.image(DAVID_X, GROUND_Y, 'spr_david')
-            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(52, 80)
+          return scene.add.image(x, y, texKey)
+            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(fallbackW, fallbackH)
         }
       }
-      if (scene.textures.exists('spr_lion')) {
-        if (spriteFrames.lion) {
-          lionSprite = scene.add.sprite(PRED_X, GROUND_Y, 'spr_lion')
-            .setOrigin(0.5, 1).setDepth(5)
-          scene.anims.create({
-            key:       'chase_lion_run',
-            frames:    scene.anims.generateFrameNumbers('spr_lion', { start: 0, end: spriteFrames.lion.frameCount - 1 }),
-            frameRate: 8,
-            repeat:    -1,
-          })
-          lionSprite.play('chase_lion_run')
-          lionIsAnimated = true
-        } else {
-          lionSprite = scene.add.image(PRED_X, GROUND_Y, 'spr_lion')
-            .setOrigin(0.5, 1).setDepth(5).setDisplaySize(80, 56)
-        }
-      }
-      if (scene.textures.exists('spr_sheep')) {
+
+      davidRunSprite  = makeAnimSprite('tex_david_run',  'chase_david_run',  spriteFrames.david_run,  DAVID_X, GROUND_Y, 52, 80)
+      davidJumpSprite = makeAnimSprite('tex_david_jump', 'chase_david_jump', spriteFrames.david_jump, DAVID_X, GROUND_Y, 52, 80)
+      lionRunSprite   = makeAnimSprite('tex_lion_run',   'chase_lion_run',   spriteFrames.lion_run,   PRED_X,  GROUND_Y, 80, 56)
+
+      // Jump sprite starts hidden — shown only when airborne
+      if (davidJumpSprite) davidJumpSprite.setVisible(false)
+
+      if (scene.textures.exists('tex_sheep')) {
         // Sheep is a static carried prop — show frame 0 if sprite sheet, full image otherwise
         sheepSprite = spriteFrames.sheep
-          ? scene.add.sprite(PRED_X - 30, GROUND_Y - 30, 'spr_sheep', 0).setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
-          : scene.add.image(PRED_X - 30, GROUND_Y - 30, 'spr_sheep').setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
+          ? scene.add.sprite(PRED_X - 30, GROUND_Y - 30, 'tex_sheep', 0).setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
+          : scene.add.image(PRED_X - 30, GROUND_Y - 30, 'tex_sheep').setOrigin(0.5, 0.5).setDepth(5).setDisplaySize(28, 24)
       }
 
       // Draw initial poses
@@ -364,10 +356,25 @@ const ChaseRescue = {
     function drawDavid(scene) {
       davidGfx.clear()
 
-      if (davidSprite) {
-        davidSprite.y = davidY
-        // Static images: simulate running by alternating flip; animated sheets handle motion themselves
-        if (!davidIsAnimated) davidSprite.setFlipX(animFrame === 1)
+      if (davidRunSprite || davidJumpSprite) {
+        const airborne = !grounded
+        if (davidRunSprite) {
+          davidRunSprite.y = davidY
+          davidRunSprite.setVisible(!airborne)
+          if (!(davidRunSprite instanceof Phaser.GameObjects.Sprite)) {
+            davidRunSprite.setFlipX(animFrame === 1)
+          }
+        }
+        if (davidJumpSprite) {
+          davidJumpSprite.y = davidY
+          davidJumpSprite.setVisible(airborne)
+          if (!(davidJumpSprite instanceof Phaser.GameObjects.Sprite)) {
+            davidJumpSprite.setFlipX(animFrame === 1)
+          }
+        } else if (davidRunSprite) {
+          // No jump sprite: keep run sprite visible during jump too
+          davidRunSprite.setVisible(true)
+        }
         return
       }
 
@@ -424,10 +431,11 @@ const ChaseRescue = {
     function drawPredator(scene) {
       predGfx.clear()
 
-      if (lionSprite) {
-        if (!lionIsAnimated) lionSprite.setFlipX(animFrame === 1)
+      if (lionRunSprite) {
+        if (!(lionRunSprite instanceof Phaser.GameObjects.Sprite)) {
+          lionRunSprite.setFlipX(animFrame === 1)
+        }
         if (sheepSprite) {
-          // Keep sheep attached near lion's mouth
           sheepSprite.x = PRED_X - 30
           sheepSprite.y = GROUND_Y - 30
         }
