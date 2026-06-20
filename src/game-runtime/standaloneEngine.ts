@@ -110,6 +110,7 @@ export class GameEngine {
     const hasTitleScreen=!!(ts?.titleText||(ts?.buttons&&ts.buttons.length>0));
     return {
       currentSceneId: this.project.settings?.startingSceneId || this.project.scenes[0]?.id || '',
+      currentStageId: null,
       variables: {},
       visitedScenes: [],
       running: false,
@@ -131,6 +132,7 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
+    this._initStageForScene(this.state.currentSceneId);
     if(this.state.showTitleScreen){
       const ts=this.project.titleScreen;
       if(ts?.backgroundImageUrl) this._loadImage(ts.backgroundImageUrl);
@@ -138,6 +140,70 @@ export class GameEngine {
       this._loadScene(this.state.currentSceneId,undefined,true);
     }
     this._loop();
+  }
+
+  _initStageForScene(sceneId) {
+    const stage=(this.project.stages||[]).find(s=>(s.sceneIds||[]).includes(sceneId));
+    if(!stage||stage.id===this.state.currentStageId) return;
+    this.state.currentStageId=stage.id;
+    for(const v of stage.variables||[]){
+      const val=v.type==='number'?(Number(v.defaultValue)||0):v.type==='boolean'?(v.defaultValue==='true'):v.defaultValue;
+      this.state.variables[v.name]=val;
+    }
+  }
+
+  _evaluateGoals() {
+    const stageId=this.state.currentStageId;
+    if(!stageId) return;
+    const goals=(this.project.goals||[]).filter(g=>g.stageId===stageId&&!g.completed);
+    for(const goal of goals){
+      if(this._checkGoalConditions(goal)){this._completeGoal(goal);return;}
+    }
+  }
+
+  _checkGoalConditions(goal) {
+    if(!goal.conditions.length) return false;
+    const results=goal.conditions.map(c=>this._checkCondition(c));
+    return goal.logic==='AND'?results.every(Boolean):results.some(Boolean);
+  }
+
+  _checkCondition(cond) {
+    const raw=this.state.variables[cond.target];
+    const sv=raw!==undefined?String(raw):'';
+    switch(cond.operator){
+      case 'equals':       return sv===cond.value;
+      case 'not_equals':   return sv!==cond.value;
+      case 'greater_than': return Number(sv)>Number(cond.value);
+      case 'less_than':    return Number(sv)<Number(cond.value);
+      case 'contains':     return sv.includes(cond.value);
+      default:             return false;
+    }
+  }
+
+  _completeGoal(goal) {
+    goal.completed=true;
+    switch(goal.completionAction){
+      case 'advance_stage':{
+        const stages=[...(this.project.stages||[])].sort((a,b)=>a.order-b.order);
+        const idx=stages.findIndex(s=>s.id===this.state.currentStageId);
+        const next=stages[idx+1];
+        if(next){
+          this.state.currentStageId=next.id;
+          for(const v of next.variables||[]){
+            const val=v.type==='number'?(Number(v.defaultValue)||0):v.type==='boolean'?(v.defaultValue==='true'):v.defaultValue;
+            this.state.variables[v.name]=val;
+          }
+          if(next.startingSceneId) this._loadScene(next.startingSceneId,undefined,true);
+        }
+        break;
+      }
+      case 'end_game':
+        this.state.dialogText=goal.completionValue||'You completed the game!';
+        break;
+      case 'show_dialog':
+        this.state.dialogText=goal.completionValue;
+        break;
+    }
   }
 
   stop() {
@@ -160,6 +226,7 @@ export class GameEngine {
     this.state.activeHotspots = new Set();
     this.state.activeTeleportZones = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
+    this._initStageForScene(sceneId);
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
       if (scene.backgroundImageUrl) this._loadImage(scene.backgroundImageUrl);
@@ -713,7 +780,7 @@ export class GameEngine {
       case 'show_dialog': this.state.dialogText=action.value; break;
       case 'set_variable':{
         const i=action.value.indexOf('=');
-        if(i!==-1) this.state.variables[action.value.slice(0,i).trim()]=action.value.slice(i+1).trim();
+        if(i!==-1){this.state.variables[action.value.slice(0,i).trim()]=action.value.slice(i+1).trim();this._evaluateGoals();}
         break;
       }
       case 'show_object': this.objectVisibility.set(action.value,true); break;

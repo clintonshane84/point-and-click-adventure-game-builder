@@ -299,6 +299,13 @@ export interface TitleScreenConfig {
 }
 
 // Stage types
+export interface StageVariable {
+  id: string
+  name: string
+  type: 'string' | 'number' | 'boolean'
+  defaultValue: string
+}
+
 export interface Stage {
   id: string
   name: string
@@ -306,6 +313,7 @@ export interface Stage {
   startingSceneId: string
   sceneIds: string[]
   description: string
+  variables?: StageVariable[]
 }
 
 // Goal types

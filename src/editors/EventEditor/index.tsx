@@ -42,6 +42,9 @@ export function EventEditor() {
   const { scenes, events } = project
   const cinematics = project.cinematics ?? []
   const miniGames = project.miniGames ?? []
+  const allStageVarNames = Array.from(
+    new Set((project.stages ?? []).flatMap((s) => (s.variables ?? []).map((v) => v.name)))
+  )
 
   const [selectedSceneId, setSelectedSceneId] = useState(scenes[0]?.id ?? '')
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null)
@@ -415,10 +418,46 @@ export function EventEditor() {
                           </div>
                         </div>
                       </div>
+                    ) : action.type === 'set_variable' ? (
+                      (() => {
+                        const eqIdx = action.value.indexOf('=')
+                        const varName = eqIdx !== -1 ? action.value.slice(0, eqIdx) : action.value
+                        const varVal  = eqIdx !== -1 ? action.value.slice(eqIdx + 1) : ''
+                        const setVarValue = (name: string, val: string) => {
+                          const updated = [...form.actions]
+                          updated[idx] = { ...updated[idx], value: `${name}=${val}` }
+                          setForm((f) => ({ ...f, actions: updated }))
+                        }
+                        return (
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <input
+                                type="text"
+                                list={`var-names-${idx}`}
+                                value={varName}
+                                onChange={(e) => setVarValue(e.target.value, varVal)}
+                                placeholder="variableName"
+                                className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono"
+                              />
+                              <datalist id={`var-names-${idx}`}>
+                                {allStageVarNames.map((n) => <option key={n} value={n} />)}
+                              </datalist>
+                            </div>
+                            <span className="text-gray-500 self-center">=</span>
+                            <input
+                              type="text"
+                              value={varVal}
+                              onChange={(e) => setVarValue(varName, e.target.value)}
+                              placeholder="value"
+                              className="w-28 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        )
+                      })()
                     ) : (
                       <input
                         type="text"
-                        placeholder="Value (text, variable=value...)"
+                        placeholder="Value"
                         value={action.value}
                         onChange={(e) => {
                           const updated = [...form.actions]

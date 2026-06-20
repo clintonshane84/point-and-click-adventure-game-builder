@@ -2,6 +2,7 @@ import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
   CinematicCompletionAction, NpcMovementInstruction, SceneExitSide,
+  Stage, Goal, GoalCondition,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -58,6 +59,7 @@ interface CinematicPlayState {
 
 interface GameState {
   currentSceneId: string
+  currentStageId: string | null
   variables: Record<string, string | number | boolean>
   visitedScenes: string[]
   running: boolean
@@ -103,6 +105,7 @@ export class GameRuntime {
     const hasTitleScreen = !!(ts?.titleText || (ts?.buttons && ts.buttons.length > 0))
     return {
       currentSceneId: this.project.settings.startingSceneId || this.project.scenes[0]?.id || '',
+      currentStageId: null,
       variables: {},
       visitedScenes: [],
       running: false,
@@ -124,6 +127,7 @@ export class GameRuntime {
     this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
+    this.initStageForScene(this.state.currentSceneId)
     if (this.state.showTitleScreen) {
       const ts = this.project.titleScreen
       if (ts?.backgroundImageUrl) this.loadImage(ts.backgroundImageUrl)
@@ -131,6 +135,87 @@ export class GameRuntime {
       this.loadScene(this.state.currentSceneId, undefined, true)
     }
     this.renderLoop()
+  }
+
+  // ── Stage variable helpers ────────────────────────────────────────────────
+
+  private getStageForScene(sceneId: string): Stage | undefined {
+    return (this.project.stages ?? []).find((s) => s.sceneIds.includes(sceneId))
+  }
+
+  private initStageForScene(sceneId: string): void {
+    const stage = this.getStageForScene(sceneId)
+    if (!stage || stage.id === this.state.currentStageId) return
+    this.state.currentStageId = stage.id
+    for (const v of stage.variables ?? []) {
+      const val = v.type === 'number' ? (Number(v.defaultValue) || 0)
+                : v.type === 'boolean' ? (v.defaultValue === 'true')
+                : v.defaultValue
+      this.state.variables[v.name] = val
+    }
+  }
+
+  // ── Goal evaluation ───────────────────────────────────────────────────────
+
+  private evaluateGoals(): void {
+    const stageId = this.state.currentStageId
+    if (!stageId) return
+    const goals = (this.project.goals ?? []).filter((g) => g.stageId === stageId && !g.completed)
+    for (const goal of goals) {
+      if (this.checkGoalConditions(goal)) {
+        this.completeGoal(goal)
+        return
+      }
+    }
+  }
+
+  private checkGoalConditions(goal: Goal): boolean {
+    if (goal.conditions.length === 0) return false
+    const results = goal.conditions.map((c) => this.checkCondition(c))
+    return goal.logic === 'AND' ? results.every(Boolean) : results.some(Boolean)
+  }
+
+  private checkCondition(cond: GoalCondition): boolean {
+    const raw = this.state.variables[cond.target]
+    const strVal = raw !== undefined ? String(raw) : ''
+    switch (cond.operator) {
+      case 'equals':       return strVal === cond.value
+      case 'not_equals':   return strVal !== cond.value
+      case 'greater_than': return Number(strVal) > Number(cond.value)
+      case 'less_than':    return Number(strVal) < Number(cond.value)
+      case 'contains':     return strVal.includes(cond.value)
+      default:             return false
+    }
+  }
+
+  private completeGoal(goal: Goal): void {
+    // Mark completed so it doesn't fire again this session
+    ;(goal as Goal & { completed: boolean }).completed = true
+
+    switch (goal.completionAction) {
+      case 'advance_stage': {
+        const stages = [...(this.project.stages ?? [])].sort((a, b) => a.order - b.order)
+        const idx = stages.findIndex((s) => s.id === this.state.currentStageId)
+        const next = stages[idx + 1]
+        if (next) {
+          this.state.currentStageId = next.id
+          for (const v of next.variables ?? []) {
+            const val = v.type === 'number' ? (Number(v.defaultValue) || 0)
+                      : v.type === 'boolean' ? (v.defaultValue === 'true')
+                      : v.defaultValue
+            this.state.variables[v.name] = val
+          }
+          if (next.startingSceneId) this.loadScene(next.startingSceneId, undefined, true)
+        }
+        break
+      }
+      case 'end_game':
+        this.state.dialogText = goal.completionValue || 'You completed the game!'
+        break
+      case 'show_dialog':
+        this.state.dialogText = goal.completionValue
+        break
+    }
   }
 
   stop() {
@@ -160,6 +245,7 @@ export class GameRuntime {
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
+    this.initStageForScene(sceneId)
 
     const scene = this.project.scenes.find((s) => s.id === sceneId)
     if (scene) {
@@ -1454,6 +1540,7 @@ export class GameRuntime {
           const key = action.value.slice(0, eqIdx).trim()
           const val = action.value.slice(eqIdx + 1).trim()
           this.state.variables[key] = val
+          this.evaluateGoals()
         }
         break
       }
