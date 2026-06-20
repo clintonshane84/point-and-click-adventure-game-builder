@@ -171,7 +171,7 @@ export function MiniGameEditor() {
     if (!selected) return
     const map = { ...(selected.spriteMap ?? {}) }
     const key = `slot${Object.keys(map).length + 1}`
-    map[key] = ''
+    map[key] = { sheetId: '', animId: '' }
     updateMiniGame(selected.id, { spriteMap: map })
   }
 
@@ -180,13 +180,24 @@ export function MiniGameEditor() {
     const map = { ...(selected.spriteMap ?? {}) }
     const val = map[oldKey]
     delete map[oldKey]
-    map[newKey] = val ?? ''
+    map[newKey] = val ?? { sheetId: '', animId: '' }
     updateMiniGame(selected.id, { spriteMap: map })
   }
 
-  const handleSlotAssetChange = (key: string, assetId: string) => {
+  const handleSlotSheetChange = (key: string, sheetId: string) => {
     if (!selected) return
-    updateMiniGame(selected.id, { spriteMap: { ...(selected.spriteMap ?? {}), [key]: assetId } })
+    const prev = selected.spriteMap?.[key] ?? { sheetId: '', animId: '' }
+    updateMiniGame(selected.id, {
+      spriteMap: { ...(selected.spriteMap ?? {}), [key]: { ...prev, sheetId, animId: '' } },
+    })
+  }
+
+  const handleSlotAnimChange = (key: string, animId: string) => {
+    if (!selected) return
+    const prev = selected.spriteMap?.[key] ?? { sheetId: '', animId: '' }
+    updateMiniGame(selected.id, {
+      spriteMap: { ...(selected.spriteMap ?? {}), [key]: { ...prev, animId } },
+    })
   }
 
   const handleRemoveSlot = (key: string) => {
@@ -253,15 +264,24 @@ export function MiniGameEditor() {
     exitBtn.addEventListener('click', teardown)
 
     const spriteMap: Record<string, string> = {}
-    const spriteFrames: Record<string, { frameWidth: number; frameHeight: number; frameCount: number }> = {}
-    for (const [slot, ssId] of Object.entries(selected.spriteMap ?? {})) {
-      const ss = (project.spriteSheets ?? []).find((s) => s.id === ssId)
-      if (ss) {
-        spriteMap[slot] = ss.imageUrl
-        spriteFrames[slot] = {
-          frameWidth:  ss.frameWidth,
-          frameHeight: ss.frameHeight,
-          frameCount:  ss.frames.length,
+    const spriteFrames: Record<string, { url: string; frameWidth: number; frameHeight: number; startFrame: number; endFrame: number; frameRate: number; loop: boolean }> = {}
+    for (const [slot, binding] of Object.entries(selected.spriteMap ?? {})) {
+      if (!binding?.sheetId) continue
+      const ss = (project.spriteSheets ?? []).find((s) => s.id === binding.sheetId)
+      if (!ss) continue
+      spriteMap[slot] = ss.imageUrl
+      if (binding.animId) {
+        const anim = ss.animations.find((a) => a.id === binding.animId)
+        if (anim) {
+          spriteFrames[slot] = {
+            url:         ss.imageUrl,
+            frameWidth:  ss.frameWidth,
+            frameHeight: ss.frameHeight,
+            startFrame:  anim.startFrame,
+            endFrame:    anim.endFrame,
+            frameRate:   anim.fps,
+            loop:        anim.loop,
+          }
         }
       }
     }
@@ -424,32 +444,49 @@ export function MiniGameEditor() {
                   + Add slot
                 </button>
               </div>
-              {Object.entries(selected.spriteMap ?? {}).map(([slot, assetId]) => (
-                <div key={slot} className="flex items-center gap-2 mb-1">
-                  <input
-                    value={slot}
-                    onChange={(e) => handleSlotNameChange(slot, e.target.value)}
-                    placeholder="slot name"
-                    className="w-24 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
-                  />
-                  <select
-                    value={assetId}
-                    onChange={(e) => handleSlotAssetChange(slot, e.target.value)}
-                    className="flex-1 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="">— no sprite —</option>
-                    {spriteSheets.map((ss) => (
-                      <option key={ss.id} value={ss.id}>{ss.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => handleRemoveSlot(slot)}
-                    className="text-gray-500 hover:text-red-400 text-base leading-none shrink-0"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+              {Object.entries(selected.spriteMap ?? {}).map(([slot, binding]) => {
+                const sheetId = binding?.sheetId ?? ''
+                const animId  = binding?.animId  ?? ''
+                const sheet   = spriteSheets.find((ss) => ss.id === sheetId)
+                const anims   = sheet?.animations ?? []
+                return (
+                  <div key={slot} className="flex items-center gap-1 mb-1">
+                    <input
+                      value={slot}
+                      onChange={(e) => handleSlotNameChange(slot, e.target.value)}
+                      placeholder="slot"
+                      className="w-20 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
+                    />
+                    <select
+                      value={sheetId}
+                      onChange={(e) => handleSlotSheetChange(slot, e.target.value)}
+                      className="flex-1 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">— sheet —</option>
+                      {spriteSheets.map((ss) => (
+                        <option key={ss.id} value={ss.id}>{ss.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={animId}
+                      onChange={(e) => handleSlotAnimChange(slot, e.target.value)}
+                      disabled={anims.length === 0}
+                      className="flex-1 bg-gray-900 text-gray-200 text-xs px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
+                    >
+                      <option value="">— anim —</option>
+                      {anims.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => handleRemoveSlot(slot)}
+                      className="text-gray-500 hover:text-red-400 text-base leading-none shrink-0"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
               {Object.keys(selected.spriteMap ?? {}).length === 0 && (
                 <p className="text-xs text-gray-600">No sprite slots. Click "+ Add slot" to assign sprite sheets to character names.</p>
               )}

@@ -1544,15 +1544,24 @@ export class GameRuntime {
       }
 
       const spriteMap: Record<string, string> = {}
-      const spriteFrames: Record<string, { frameWidth: number; frameHeight: number; frameCount: number }> = {}
-      for (const [slot, ssId] of Object.entries(mg.spriteMap ?? {})) {
-        const ss = this.project.spriteSheets?.find((s) => s.id === ssId)
-        if (ss) {
-          spriteMap[slot] = ss.imageUrl
-          spriteFrames[slot] = {
-            frameWidth:  ss.frameWidth,
-            frameHeight: ss.frameHeight,
-            frameCount:  ss.frames.length,
+      const spriteFrames: Record<string, { url: string; frameWidth: number; frameHeight: number; startFrame: number; endFrame: number; frameRate: number; loop: boolean }> = {}
+      for (const [slot, binding] of Object.entries(mg.spriteMap ?? {})) {
+        if (!binding?.sheetId) continue
+        const ss = this.project.spriteSheets?.find((s) => s.id === binding.sheetId)
+        if (!ss) continue
+        spriteMap[slot] = ss.imageUrl
+        if (binding.animId) {
+          const anim = ss.animations.find((a) => a.id === binding.animId)
+          if (anim) {
+            spriteFrames[slot] = {
+              url:         ss.imageUrl,
+              frameWidth:  ss.frameWidth,
+              frameHeight: ss.frameHeight,
+              startFrame:  anim.startFrame,
+              endFrame:    anim.endFrame,
+              frameRate:   anim.fps,
+              loop:        anim.loop,
+            }
           }
         }
       }

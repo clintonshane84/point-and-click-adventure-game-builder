@@ -349,12 +349,17 @@ export interface CursorConfig {
 }
 
 // Mini-game types
+export interface SpriteSlotBinding {
+  sheetId: string   // references project.spriteSheets[].id
+  animId:  string   // references Animation.id within that sheet; empty = URL-only (no frame animation)
+}
+
 export interface MiniGame {
   id: string
   name: string
   description: string
   source: string        // full JS module source (ES module with default export)
-  spriteMap?: Record<string, string>  // slotName → assetId
+  spriteMap?: Record<string, SpriteSlotBinding>  // slotName → { sheetId, animId }
 }
 
 // Cinematic types
