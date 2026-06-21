@@ -97,6 +97,7 @@ export class GameEngine {
     this.project = project;
     this.imageCache = new Map();
     this.objectVisibility = new Map();
+    this.removedObjects = new Set();
     this.frameId = null;
     this.lastFrameTime = 0;
     this.titleScreenButtonRects = [];
@@ -227,6 +228,7 @@ export class GameEngine {
   reset() {
     this.stop();
     this.objectVisibility.clear();
+    this.removedObjects.clear();
     this.imageCache.clear();
     this.state = this._freshState();
     this.start();
@@ -324,7 +326,7 @@ export class GameEngine {
       if(this.state.currentSceneId!==sceneIdAtEntry) break;
       if(obj.type!=='hotspot') continue;
       const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
-      if(!vis) continue;
+      if(!vis||this.removedObjects.has(obj.id)) continue;
       const inside=fx>=obj.x&&fx<=obj.x+obj.width&&fy>=obj.y&&fy<=obj.y+obj.height;
       const wasInside=this.state.activeHotspots.has(obj.id);
       if(inside&&!wasInside){
@@ -493,7 +495,7 @@ export class GameEngine {
     let charDrawn=false;
     for(const obj of sortedObjs){
       const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
-      if(!vis) continue;
+      if(!vis||this.removedObjects.has(obj.id)) continue;
       if(!charDrawn&&charDepth!==null&&obj.zIndex>charDepth){this._renderCharacter();charDrawn=true;}
       let ro=obj;
       const _ns=(obj.type==='character'&&obj.npcId&&!this.state.cinematic)?this.state.npcStates.get(obj.id):null;
@@ -771,7 +773,7 @@ export class GameEngine {
 
   _objAt(scene,x,y) {
     return [...scene.objects]
-      .filter(o=>o.type!=='hotspot'&&(this.objectVisibility.has(o.id)?this.objectVisibility.get(o.id):o.visible))
+      .filter(o=>o.type!=='hotspot'&&!this.removedObjects.has(o.id)&&(this.objectVisibility.has(o.id)?this.objectVisibility.get(o.id):o.visible))
       .sort((a,b)=>b.zIndex-a.zIndex)
       .find(o=>x>=o.x&&x<=o.x+o.width&&y>=o.y&&y<=o.y+o.height)||null;
   }
@@ -816,6 +818,19 @@ export class GameEngine {
       }
       case 'show_object': this.objectVisibility.set(action.value,true); break;
       case 'hide_object': this.objectVisibility.set(action.value,false); break;
+      case 'remove_object': this.removedObjects.add(action.value); break;
+      case 'spawn_object':{
+        let tpl;
+        for(const s of this.project.scenes){tpl=s.objects.find(o=>o.id===action.value);if(tpl)break;}
+        if(!tpl) break;
+        const tgtScene=this.project.scenes.find(s=>s.id===(action.spawnSceneId||this.state.currentSceneId));
+        if(!tgtScene) break;
+        const spawnId='sp-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+        const spawnX=(action.spawnX!=null)?action.spawnX:tpl.x;
+        const spawnY=(action.spawnY!=null)?action.spawnY:tpl.y;
+        tgtScene.objects.push(Object.assign({},tpl,{id:spawnId,x:spawnX,y:spawnY,visible:true}));
+        break;
+      }
       case 'play_sound':{
         const a=this.project.assets?.find(a=>a.id===action.value||a.name===action.value);
         if(a?.url) new Audio(a.url).play().catch(()=>{});

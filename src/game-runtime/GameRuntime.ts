@@ -83,6 +83,7 @@ export class GameRuntime {
   private state: GameState
   private imageCache = new Map<string, HTMLImageElement>()
   private objectVisibility = new Map<string, boolean>()
+  private removedObjects = new Set<string>()
   private frameId: number | null = null
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
@@ -280,6 +281,7 @@ export class GameRuntime {
   reset() {
     this.stop()
     this.objectVisibility.clear()
+    this.removedObjects.clear()
     this.imageCache.clear()
     this.state = this.freshState()
     this.start()
@@ -478,7 +480,7 @@ export class GameRuntime {
       const vis = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
         : obj.visible
-      if (!vis) continue
+      if (!vis || this.removedObjects.has(obj.id)) continue
 
       const inside =
         fx >= obj.x && fx <= obj.x + obj.width &&
@@ -1243,7 +1245,7 @@ export class GameRuntime {
       const visible = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
         : obj.visible
-      if (!visible) continue
+      if (!visible || this.removedObjects.has(obj.id)) continue
 
       // Insert character draw before the first object whose z-index exceeds charDepth
       if (!charDrawn && charDepth !== null && obj.zIndex > charDepth) {
@@ -1545,6 +1547,7 @@ export class GameRuntime {
     return [...scene.objects]
       .filter((o) => {
         if (o.type === 'hotspot') return false   // hotspots don't intercept clicks or cursor
+        if (this.removedObjects.has(o.id)) return false
         const vis = this.objectVisibility.has(o.id) ? this.objectVisibility.get(o.id)! : o.visible
         return vis
       })
@@ -1595,6 +1598,29 @@ export class GameRuntime {
       case 'hide_object':
         this.objectVisibility.set(action.value, false)
         break
+      case 'remove_object':
+        this.removedObjects.add(action.value)
+        break
+      case 'spawn_object': {
+        let template: SceneObject | undefined
+        for (const s of this.project.scenes) {
+          template = s.objects.find((o) => o.id === action.value)
+          if (template) break
+        }
+        if (!template) break
+        const targetScene = this.project.scenes.find(
+          (s) => s.id === (action.spawnSceneId || this.state.currentSceneId)
+        )
+        if (!targetScene) break
+        targetScene.objects.push({
+          ...template,
+          id: `spawned-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          x: action.spawnX ?? template.x,
+          y: action.spawnY ?? template.y,
+          visible: true,
+        })
+        break
+      }
       case 'play_sound': {
         const asset = this.project.assets.find(
           (a) => a.id === action.value || a.name === action.value

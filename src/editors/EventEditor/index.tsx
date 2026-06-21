@@ -40,13 +40,15 @@ const ACTION_LABELS: Record<ActionType, string> = {
   set_variable:   'Set Variable',
   show_object:    'Show Object',
   hide_object:    'Hide Object',
+  remove_object:  'Remove Object',
+  spawn_object:   'Spawn Object',
   play_animation: 'Play Animation',
   stop_animation: 'Stop Animation',
   play_cinematic: 'Play Cinematic',
   launch_minigame:'Launch Mini-Game',
 }
 
-type FormAction = Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing'>
+type FormAction = Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing' | 'spawnSceneId' | 'spawnX' | 'spawnY'>
 type FormCondition = Omit<EventCondition, never>
 type FormBranch = { id: string; conditions: FormCondition[]; logic: 'AND' | 'OR'; actions: FormAction[] }
 
@@ -163,6 +165,47 @@ function ActionValueEditor({
           onChange={(e) => rebuild(varName, op, e.target.value)}
           placeholder={op === '=' ? 'value' : 'number'}
           className="w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
+      </div>
+    )
+  }
+  if (action.type === 'remove_object') {
+    return (
+      <select value={action.value} onChange={(e) => update({ value: e.target.value })}
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+        <option value="">— select object to remove —</option>
+        {scenes.map((s) => s.objects.length > 0 && (
+          <optgroup key={s.id} label={s.name}>
+            {s.objects.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </optgroup>
+        ))}
+      </select>
+    )
+  }
+  if (action.type === 'spawn_object') {
+    return (
+      <div className="space-y-1.5">
+        <select value={action.value} onChange={(e) => update({ value: e.target.value })}
+          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+          <option value="">— select template object —</option>
+          {scenes.map((s) => s.objects.length > 0 && (
+            <optgroup key={s.id} label={s.name}>
+              {s.objects.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <select value={action.spawnSceneId ?? ''} onChange={(e) => update({ spawnSceneId: e.target.value || undefined })}
+          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+          <option value="">— current scene —</option>
+          {scenes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <div className="flex gap-2">
+          <input type="number" placeholder="X" value={action.spawnX ?? ''}
+            onChange={(e) => update({ spawnX: e.target.value !== '' ? Number(e.target.value) : undefined })}
+            className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
+          <input type="number" placeholder="Y" value={action.spawnY ?? ''}
+            onChange={(e) => update({ spawnY: e.target.value !== '' ? Number(e.target.value) : undefined })}
+            className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
+        </div>
       </div>
     )
   }
@@ -404,14 +447,18 @@ export function EventEditor() {
   const handleSubmit = () => {
     let newEvent: EventTrigger
     const ts = Date.now()
-    const baseActions = form.actions.map((a, i) => ({
-      id: `action-${ts}-${i}`,
+    const serializeAction = (a: FormAction, id: string): EventAction => ({
+      id,
       type: a.type,
       value: a.value,
       ...(a.entryX != null ? { entryX: a.entryX } : {}),
       ...(a.entryY != null ? { entryY: a.entryY } : {}),
       ...(a.entryFacing ? { entryFacing: a.entryFacing } : {}),
-    }))
+      ...(a.spawnSceneId ? { spawnSceneId: a.spawnSceneId } : {}),
+      ...(a.spawnX != null ? { spawnX: a.spawnX } : {}),
+      ...(a.spawnY != null ? { spawnY: a.spawnY } : {}),
+    })
+    const baseActions = form.actions.map((a, i) => serializeAction(a, `action-${ts}-${i}`))
     const baseBranches: EventBranch[] = form.branches.map((br, bi) => ({
       id: br.id || `br-${ts}-${bi}`,
       conditions: br.conditions.map((c, ci): EventCondition => ({
@@ -421,14 +468,7 @@ export function EventEditor() {
         value: c.value,
       })),
       logic: br.logic,
-      actions: br.actions.map((a, ai) => ({
-        id: `action-${ts}-br${bi}-${ai}`,
-        type: a.type,
-        value: a.value,
-        ...(a.entryX != null ? { entryX: a.entryX } : {}),
-        ...(a.entryY != null ? { entryY: a.entryY } : {}),
-        ...(a.entryFacing ? { entryFacing: a.entryFacing } : {}),
-      })),
+      actions: br.actions.map((a, ai) => serializeAction(a, `action-${ts}-br${bi}-${ai}`)),
     }))
 
     if (scope === 'scene') {

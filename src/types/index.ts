@@ -156,6 +156,8 @@ export type ActionType =
   | 'set_variable'
   | 'show_object'
   | 'hide_object'
+  | 'remove_object'
+  | 'spawn_object'
   | 'play_animation'
   | 'stop_animation'
   | 'play_cinematic'
@@ -169,6 +171,9 @@ export interface EventAction {
   entryX?: number          // hero X in destination scene (navigate_scene only)
   entryY?: number          // hero Y in destination scene (navigate_scene only)
   entryFacing?: FacingDirection  // hero facing in destination scene (navigate_scene only)
+  spawnSceneId?: string    // spawn_object: target scene ID (defaults to current scene)
+  spawnX?: number          // spawn_object: X position
+  spawnY?: number          // spawn_object: Y position
 }
 
 export interface EventCondition {
