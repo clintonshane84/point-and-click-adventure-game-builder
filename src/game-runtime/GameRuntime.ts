@@ -163,6 +163,34 @@ export class GameRuntime {
     stageStartEvents.forEach((e) => this.executeEvent(e))
   }
 
+  // ── Variable expression parser ────────────────────────────────────────────
+  // Supports:  name=value  (assign)
+  //            name+=N     (add N to current numeric value)
+  //            name-=N     (subtract N from current numeric value)
+
+  private applyVariableExpression(expr: string): void {
+    const addIdx = expr.indexOf('+=')
+    const subIdx = expr.indexOf('-=')
+    if (addIdx !== -1) {
+      const key = expr.slice(0, addIdx).trim()
+      const amt = Number(expr.slice(addIdx + 2).trim())
+      if (key && !isNaN(amt)) this.state.variables[key] = (Number(this.state.variables[key] ?? 0) + amt)
+      return
+    }
+    if (subIdx !== -1) {
+      const key = expr.slice(0, subIdx).trim()
+      const amt = Number(expr.slice(subIdx + 2).trim())
+      if (key && !isNaN(amt)) this.state.variables[key] = (Number(this.state.variables[key] ?? 0) - amt)
+      return
+    }
+    const eqIdx = expr.indexOf('=')
+    if (eqIdx !== -1) {
+      const key = expr.slice(0, eqIdx).trim()
+      const val = expr.slice(eqIdx + 1).trim()
+      if (key) this.state.variables[key] = val
+    }
+  }
+
   // ── Goal evaluation ───────────────────────────────────────────────────────
 
   private evaluateGoals(): void {
@@ -731,12 +759,7 @@ export class GameRuntime {
         break
       }
       case 'set_variable': {
-        if (step.variable) {
-          const i = step.variable.indexOf('=')
-          if (i !== -1) {
-            this.state.variables[step.variable.slice(0, i).trim()] = step.variable.slice(i + 1).trim()
-          }
-        }
+        if (step.variable) this.applyVariableExpression(step.variable)
         this.advanceCinematicStep()
         break
       }
@@ -775,10 +798,7 @@ export class GameRuntime {
         break
       }
       case 'set_variable': {
-        const i = completionValue.indexOf('=')
-        if (i !== -1) {
-          this.state.variables[completionValue.slice(0, i).trim()] = completionValue.slice(i + 1).trim()
-        }
+        this.applyVariableExpression(completionValue)
         break
       }
       case 'return_to_game':
@@ -1543,13 +1563,8 @@ export class GameRuntime {
         this.state.dialogText = action.value
         break
       case 'set_variable': {
-        const eqIdx = action.value.indexOf('=')
-        if (eqIdx !== -1) {
-          const key = action.value.slice(0, eqIdx).trim()
-          const val = action.value.slice(eqIdx + 1).trim()
-          this.state.variables[key] = val
-          this.evaluateGoals()
-        }
+        this.applyVariableExpression(action.value)
+        this.evaluateGoals()
         break
       }
       case 'show_object':

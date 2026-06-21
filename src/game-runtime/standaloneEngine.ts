@@ -156,6 +156,13 @@ export class GameEngine {
     stageStartEvs.forEach(e=>this._execEvent(e));
   }
 
+  _applyVarExpr(expr) {
+    const ai=expr.indexOf('+='),si=expr.indexOf('-=');
+    if(ai!==-1){const k=expr.slice(0,ai).trim(),n=Number(expr.slice(ai+2).trim());if(k&&!isNaN(n))this.state.variables[k]=(Number(this.state.variables[k]??0)+n);return;}
+    if(si!==-1){const k=expr.slice(0,si).trim(),n=Number(expr.slice(si+2).trim());if(k&&!isNaN(n))this.state.variables[k]=(Number(this.state.variables[k]??0)-n);return;}
+    const ei=expr.indexOf('=');if(ei!==-1){const k=expr.slice(0,ei).trim(),v=expr.slice(ei+1).trim();if(k)this.state.variables[k]=v;}
+  }
+
   _evaluateGoals() {
     const stageId=this.state.currentStageId;
     if(!stageId) return;
@@ -783,8 +790,7 @@ export class GameEngine {
       }
       case 'show_dialog': this.state.dialogText=action.value; break;
       case 'set_variable':{
-        const i=action.value.indexOf('=');
-        if(i!==-1){this.state.variables[action.value.slice(0,i).trim()]=action.value.slice(i+1).trim();this._evaluateGoals();}
+        this._applyVarExpr(action.value);this._evaluateGoals();
         break;
       }
       case 'show_object': this.objectVisibility.set(action.value,true); break;
@@ -875,10 +881,7 @@ export class GameEngine {
         break;
       }
       case 'set_variable':{
-        if(step.variable){
-          const i=step.variable.indexOf('=');
-          if(i!==-1) this.state.variables[step.variable.slice(0,i).trim()]=step.variable.slice(i+1).trim();
-        }
+        if(step.variable) this._applyVarExpr(step.variable);
         this._advanceCinematicStep();
         break;
       }
@@ -907,8 +910,7 @@ export class GameEngine {
       }
       case 'show_dialog': this.state.dialogText=cv; break;
       case 'set_variable':{
-        const i=cv.indexOf('=');
-        if(i!==-1) this.state.variables[cv.slice(0,i).trim()]=cv.slice(i+1).trim();
+        this._applyVarExpr(cv);
         break;
       }
     }
