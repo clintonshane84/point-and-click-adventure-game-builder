@@ -30,6 +30,9 @@ export const fsaSupported =
   'showDirectoryPicker' in window &&
   'showOpenFilePicker' in window
 
+export const savePickerSupported =
+  typeof window !== 'undefined' && 'showSaveFilePicker' in window
+
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
 function openIDB(): Promise<IDBDatabase> {
@@ -173,7 +176,30 @@ export async function saveProject(project: GameProject): Promise<SaveResult> {
       }
     }
 
-    // 2. Write to the chosen FSA directory
+    // 2. "Save As" file picker — user picks exact file; handle stored for future overwrites
+    if (savePickerSupported) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newHandle: FileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: 'Adventure Game Builder Project',
+            accept: { 'application/json': ['.json'] },
+          }],
+        })
+        const writable = await newHandle.createWritable()
+        await writable.write(json)
+        await writable.close()
+        await saveFileHandle(newHandle)
+        return { ok: true, path: newHandle.name as string, method: 'fsa-file' }
+      } catch (err) {
+        const name = (err as Error).name
+        if (name === 'AbortError') return { ok: false, error: 'cancelled' }
+        console.warn('showSaveFilePicker failed, trying directory approach:', err)
+      }
+    }
+
+    // 3. Write to the chosen FSA directory
     try {
       const dirHandle  = await getOrPickDirectory()
       const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
