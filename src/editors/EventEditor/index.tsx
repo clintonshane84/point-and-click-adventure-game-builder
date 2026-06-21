@@ -52,7 +52,19 @@ const ACTION_LABELS: Record<ActionType, string> = {
   trigger_event:  'Trigger Event',
 }
 
-type FormAction = Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing' | 'spawnSceneId' | 'spawnX' | 'spawnY'>
+interface FormAction {
+  type: ActionType
+  value: string
+  entryX?: number
+  entryY?: number
+  entryFacing?: FacingDirection
+  spawnSceneId?: string
+  spawnX?: number
+  spawnY?: number
+  onWinActions?: FormAction[]
+  onLoseActions?: FormAction[]
+  onExitActions?: FormAction[]
+}
 type FormCondition = Omit<EventCondition, never>
 type FormBranch = { id: string; conditions: FormCondition[]; logic: 'AND' | 'OR'; actions: FormAction[] }
 
@@ -92,12 +104,30 @@ function ActionValueEditor({
     )
   }
   if (action.type === 'launch_minigame') {
+    const resultSections = [
+      { key: 'onWinActions',  label: 'On Win',  border: 'border-green-800',  heading: 'text-green-400'  },
+      { key: 'onLoseActions', label: 'On Lose', border: 'border-red-800',    heading: 'text-red-400'    },
+      { key: 'onExitActions', label: 'On Exit', border: 'border-gray-600',   heading: 'text-gray-400'   },
+    ] as const
     return (
-      <select value={action.value} onChange={(e) => update({ value: e.target.value })}
-        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
-        <option value="">— select mini-game —</option>
-        {miniGames.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select>
+      <div className="space-y-2">
+        <select value={action.value} onChange={(e) => update({ value: e.target.value })}
+          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+          <option value="">— select mini-game —</option>
+          {miniGames.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        {resultSections.map(({ key, label, border, heading }) => (
+          <div key={key} className={`border ${border} rounded p-2 space-y-1`}>
+            <p className={`text-xs font-semibold ${heading}`}>{label}</p>
+            <ActionsEditor
+              actions={(action[key] as FormAction[] | undefined) ?? []}
+              onActionsChange={(next) => update({ [key]: next })}
+              scenes={scenes} cinematics={cinematics} miniGames={miniGames}
+              allStageVarNames={allStageVarNames} events={events}
+            />
+          </div>
+        ))}
+      </div>
     )
   }
   if (action.type === 'navigate_scene') {
@@ -486,6 +516,9 @@ export function EventEditor() {
       ...(a.spawnSceneId ? { spawnSceneId: a.spawnSceneId } : {}),
       ...(a.spawnX != null ? { spawnX: a.spawnX } : {}),
       ...(a.spawnY != null ? { spawnY: a.spawnY } : {}),
+      ...(a.onWinActions?.length  ? { onWinActions:  a.onWinActions.map((wa, wi) => serializeAction(wa, `${id}-win-${wi}`))  } : {}),
+      ...(a.onLoseActions?.length ? { onLoseActions: a.onLoseActions.map((la, li) => serializeAction(la, `${id}-lose-${li}`)) } : {}),
+      ...(a.onExitActions?.length ? { onExitActions: a.onExitActions.map((ea, ei) => serializeAction(ea, `${id}-exit-${ei}`)) } : {}),
     })
     const baseActions = form.actions.map((a, i) => serializeAction(a, `action-${ts}-${i}`))
     const baseBranches: EventBranch[] = form.branches.map((br, bi) => ({

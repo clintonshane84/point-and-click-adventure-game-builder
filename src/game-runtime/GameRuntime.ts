@@ -1685,7 +1685,7 @@ export class GameRuntime {
         break
       }
       case 'launch_minigame': {
-        this.launchMiniGame(action.value)
+        this.launchMiniGame(action)
         break
       }
       case 'trigger_event': {
@@ -1717,8 +1717,8 @@ export class GameRuntime {
     return mod.default
   }
 
-  private async launchMiniGame(id: string) {
-    const mg = (this.project.miniGames ?? []).find((m) => m.id === id)
+  private async launchMiniGame(action: EventAction) {
+    const mg = (this.project.miniGames ?? []).find((m) => m.id === action.value)
     if (!mg?.source) return
 
     const returnSceneId = this.state.currentSceneId
@@ -1794,6 +1794,13 @@ export class GameRuntime {
         this.state.running = true
         this.lastFrameTime = 0
         this.renderLoop()
+
+        // Execute result-specific post-game actions
+        const resultActions =
+          result === 'win'  ? (action.onWinActions  ?? []) :
+          result === 'lose' ? (action.onLoseActions ?? []) :
+                              (action.onExitActions ?? [])
+        resultActions.forEach((a) => this.executeAction(a))
       }
 
       const spriteMap: Record<string, string> = {}

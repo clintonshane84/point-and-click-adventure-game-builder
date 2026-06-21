@@ -175,6 +175,9 @@ export interface EventAction {
   spawnSceneId?: string    // spawn_object: target scene ID (defaults to current scene)
   spawnX?: number          // spawn_object: X position
   spawnY?: number          // spawn_object: Y position
+  onWinActions?: EventAction[]   // launch_minigame: actions to run when result === 'win'
+  onLoseActions?: EventAction[]  // launch_minigame: actions to run when result === 'lose'
+  onExitActions?: EventAction[]  // launch_minigame: actions to run when result === 'exit'
 }
 
 export interface EventCondition {

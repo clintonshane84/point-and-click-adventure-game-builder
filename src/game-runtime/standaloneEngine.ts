@@ -864,7 +864,7 @@ export class GameEngine {
         break;
       }
       case 'play_cinematic': this._playCinematic(action.value); break;
-      case 'launch_minigame': this._launchMiniGame(action.value); break;
+      case 'launch_minigame': this._launchMiniGame(action); break;
       case 'trigger_event':{
         const ev=(this.project.events||[]).find(e=>e.id===action.value);
         if(ev) this._execEvent(ev);
@@ -1060,8 +1060,8 @@ export class GameEngine {
     return mod.default;
   }
 
-  async _launchMiniGame(id){
-    const mg=(this.project.miniGames||[]).find(m=>m.id===id);
+  async _launchMiniGame(action){
+    const mg=(this.project.miniGames||[]).find(m=>m.id===action.value);
     if(!mg?.source) return;
     const returnSceneId=this.state.currentSceneId;
     const snapshot={
@@ -1107,6 +1107,8 @@ export class GameEngine {
         this.state.running=true;
         this.lastFrameTime=0;
         this._loop();
+        const resultActions=result==='win'?(action.onWinActions||[]):result==='lose'?(action.onLoseActions||[]):(action.onExitActions||[]);
+        resultActions.forEach(a=>this._execAction(a));
       };
       const spriteMap={};
       const spriteFrames={};
