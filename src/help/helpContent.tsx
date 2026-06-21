@@ -880,6 +880,28 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
     ),
   },
 
+  quest: {
+    title: 'Quest Log',
+    content: (
+      <>
+        <P>
+          The Quest Log lets you define predefined quests that can be activated during gameplay via event actions.
+          Players see a notification when a new quest starts and can open the quest log in-game to track progress.
+        </P>
+        <P>
+          <strong>Creating quests:</strong> Use the Quest Log editor to define each quest with a name, description, and optional objectives.
+          Quests are identified by their ID, which is used in event actions.
+        </P>
+        <P>
+          <strong>In-game controls:</strong> Press <strong>J</strong> or click the 📜 button (top-right of the game canvas) to toggle the quest log panel.
+        </P>
+        <P>
+          <strong>Event actions:</strong> Use <strong>Add Quest</strong> to activate a quest (shows a notification dialog) and <strong>Complete Quest</strong> to mark it done.
+        </P>
+      </>
+    ),
+  },
+
   export: {
     title: 'Export Game',
     content: (

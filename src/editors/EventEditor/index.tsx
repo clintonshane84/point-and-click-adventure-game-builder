@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, Trash2, Zap, ChevronDown, ChevronUp, Globe, BookOpen, Pencil } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { EventTrigger, EventAction, EventCondition, EventBranch, TriggerType, ActionType, ConditionOperator, FacingDirection, Scene, Cinematic, MiniGame } from '../../types'
+import type { EventTrigger, EventAction, EventCondition, EventBranch, TriggerType, ActionType, ConditionOperator, FacingDirection, Scene, Cinematic, MiniGame, Quest } from '../../types'
 
 type EventScope = 'scene' | 'stage' | 'global'
 
@@ -50,6 +50,8 @@ const ACTION_LABELS: Record<ActionType, string> = {
   play_cinematic: 'Play Cinematic',
   launch_minigame:'Launch Mini-Game',
   trigger_event:  'Trigger Event',
+  add_quest:      'Add Quest',
+  complete_quest: 'Complete Quest',
 }
 
 interface FormAction {
@@ -122,6 +124,7 @@ function ActionValueEditor({
   allStageVarNames: string[]
   events: EventTrigger[]
 }) {
+  const quests = useGameStore((s) => s.project.quests ?? [])
   const update = (patch: Partial<FormAction>) => {
     const updated = [...actions]
     updated[idx] = { ...updated[idx], ...patch }
@@ -343,6 +346,15 @@ function ActionValueEditor({
             : ev.id
           return <option key={ev.id} value={ev.id}>{label}</option>
         })}
+      </select>
+    )
+  }
+  if (action.type === 'add_quest' || action.type === 'complete_quest') {
+    return (
+      <select value={action.value} onChange={(e) => update({ value: e.target.value })}
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+        <option value="">— select quest —</option>
+        {quests.map((q: Quest) => <option key={q.id} value={q.id}>{q.name}</option>)}
       </select>
     )
   }

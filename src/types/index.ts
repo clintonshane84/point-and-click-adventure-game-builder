@@ -12,6 +12,7 @@ export type EditorType =
   | 'titlescreen'
   | 'stage'
   | 'goal'
+  | 'quest'
   | 'cursor'
   | 'preview'
   | 'export'
@@ -163,6 +164,8 @@ export type ActionType =
   | 'play_cinematic'
   | 'launch_minigame'
   | 'trigger_event'
+  | 'add_quest'
+  | 'complete_quest'
 
 export interface EventAction {
   id: string
@@ -437,6 +440,19 @@ export interface Cinematic {
   completionValue: string
 }
 
+// Quest types
+export interface QuestObjective {
+  id: string
+  text: string
+}
+
+export interface Quest {
+  id: string
+  name: string
+  description: string
+  objectives?: QuestObjective[]
+}
+
 // Top-level project
 export interface GameProject {
   id: string
@@ -458,4 +474,5 @@ export interface GameProject {
   goals: Goal[]
   cursorConfig: CursorConfig
   miniGames?: MiniGame[]
+  quests?: Quest[]
 }

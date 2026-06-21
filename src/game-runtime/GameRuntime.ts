@@ -72,6 +72,9 @@ interface GameState {
   miniGame: { returnSceneId: string; instance: { destroy(): void } | null } | null
   npcStates: Map<string, NpcRuntimeState>
   showTitleScreen: boolean
+  activeQuestIds: string[]
+  completedQuestIds: string[]
+  questLogOpen: boolean
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -90,7 +93,10 @@ export class GameRuntime {
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
   private boundMouseMove: (e: MouseEvent) => void
+  private boundKeyDown: (e: KeyboardEvent) => void
   private titleScreenButtonRects: { id: string; action: string; x: number; y: number; w: number; h: number }[] = []
+  private questButtonRect = { x: 0, y: 0, w: 0, h: 0 }
+  private questLogCloseRect = { x: 0, y: 0, w: 0, h: 0 }
 
   constructor(canvas: HTMLCanvasElement, project: GameProject) {
     this.canvas = canvas
@@ -101,6 +107,7 @@ export class GameRuntime {
     this.state = this.freshState()
     this.boundClick = this.handleClick.bind(this)
     this.boundMouseMove = this.handleMouseMove.bind(this)
+    this.boundKeyDown = this.handleKeyDown.bind(this)
   }
 
   private freshState(): GameState {
@@ -121,6 +128,9 @@ export class GameRuntime {
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
       miniGame: null,
+      activeQuestIds: [],
+      completedQuestIds: [],
+      questLogOpen: false,
     }
   }
 
@@ -130,6 +140,7 @@ export class GameRuntime {
     this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
+    window.addEventListener('keydown', this.boundKeyDown)
     // Fire game_start events before the first scene loads
     const gameStartEvents = (this.project.events ?? []).filter((e) => this.evTriggers(e).includes('game_start') && e.enabled)
     gameStartEvents.forEach((e) => this.executeEvent(e))
@@ -274,6 +285,7 @@ export class GameRuntime {
     this.state.running = false
     this.canvas.removeEventListener('click', this.boundClick)
     this.canvas.removeEventListener('mousemove', this.boundMouseMove)
+    window.removeEventListener('keydown', this.boundKeyDown)
     if (this.frameId !== null) {
       cancelAnimationFrame(this.frameId)
       this.frameId = null
@@ -1209,6 +1221,8 @@ export class GameRuntime {
 
     if (this.state.dialogText) this.renderDialog()
     if (this.state.cinematic?.actionText) this.renderActionLabel()
+    this.renderQuestHUDButton()
+    if (this.state.questLogOpen) this.renderQuestLog()
   }
 
   private renderTitleScreen() {
@@ -1505,6 +1519,147 @@ export class GameRuntime {
     ctx.fillText('▶ Click to continue', canvas.width - 16, boxY + boxH - 8)
   }
 
+  private renderQuestHUDButton() {
+    if (this.state.showTitleScreen) return
+    const { ctx, canvas } = this
+    const w = 52, h = 28, x = canvas.width - w - 8, y = 8
+    this.questButtonRect = { x, y, w, h }
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'
+    ctx.strokeStyle = '#4f46e5'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 6)
+    ctx.fill()
+    ctx.stroke()
+    ctx.fillStyle = '#e2e8f0'
+    ctx.font = `bold ${Math.max(10, Math.min(12, canvas.width / 80))}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(`📜 ${this.state.activeQuestIds.length}`, x + w / 2, y + h / 2)
+  }
+
+  private renderQuestLog() {
+    const { ctx, canvas } = this
+    const panelW = Math.min(320, canvas.width * 0.85)
+    const panelH = Math.min(canvas.height * 0.78, 500)
+    const panelX = canvas.width - panelW - 8
+    const panelY = 44
+
+    ctx.fillStyle = 'rgba(15,15,30,0.96)'
+    ctx.strokeStyle = '#4f46e5'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.roundRect(panelX, panelY, panelW, panelH, 8)
+    ctx.fill()
+    ctx.stroke()
+
+    const fontSize = Math.max(11, Math.min(13, canvas.width / 70))
+    const lineH = fontSize + 6
+    const pad = 14
+
+    // Header
+    ctx.fillStyle = '#e2e8f0'
+    ctx.font = `bold ${fontSize + 2}px sans-serif`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText('Quest Log', panelX + pad, panelY + pad)
+
+    // Close button
+    const closeW = 22, closeH = 22
+    const closeX = panelX + panelW - closeW - 8
+    const closeY = panelY + 8
+    this.questLogCloseRect = { x: closeX, y: closeY, w: closeW, h: closeH }
+    ctx.fillStyle = '#374151'
+    ctx.beginPath()
+    ctx.roundRect(closeX, closeY, closeW, closeH, 4)
+    ctx.fill()
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = `bold ${fontSize}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('x', closeX + closeW / 2, closeY + closeH / 2)
+
+    const quests = this.project.quests ?? []
+    let curY = panelY + pad + fontSize + 4 + lineH
+
+    const wrapText = (text: string, x: number, maxW: number, startY: number): number => {
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      const words = text.split(' ')
+      let line = ''
+      let y = startY
+      for (const word of words) {
+        const test = line + word + ' '
+        if (ctx.measureText(test).width > maxW && line) {
+          ctx.fillText(line.trim(), x, y)
+          line = word + ' '
+          y += lineH
+        } else {
+          line = test
+        }
+      }
+      if (line.trim()) { ctx.fillText(line.trim(), x, y); y += lineH }
+      return y
+    }
+
+    // Active quests
+    const active = this.state.activeQuestIds.map((id) => quests.find((q) => q.id === id)).filter(Boolean) as typeof quests
+    if (active.length > 0) {
+      ctx.fillStyle = '#818cf8'
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText('Active', panelX + pad, curY)
+      curY += lineH + 2
+
+      for (const quest of active) {
+        if (curY > panelY + panelH - pad) break
+        ctx.fillStyle = '#e2e8f0'
+        ctx.font = `bold ${fontSize}px sans-serif`
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'top'
+        ctx.fillText(quest.name, panelX + pad, curY)
+        curY += lineH
+        ctx.fillStyle = '#94a3b8'
+        curY = wrapText(quest.description, panelX + pad, panelW - pad * 2, curY)
+        for (const obj of quest.objectives ?? []) {
+          if (curY > panelY + panelH - pad) break
+          ctx.fillStyle = '#6b7280'
+          ctx.fillText(`  o ${obj.text}`, panelX + pad + 4, curY)
+          curY += lineH
+        }
+        curY += 4
+      }
+    }
+
+    // Completed quests
+    const completed = this.state.completedQuestIds.map((id) => quests.find((q) => q.id === id)).filter(Boolean) as typeof quests
+    if (completed.length > 0 && curY < panelY + panelH - pad) {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText('Completed', panelX + pad, curY)
+      curY += lineH + 2
+      for (const quest of completed) {
+        if (curY > panelY + panelH - pad) break
+        ctx.fillStyle = '#4b5563'
+        ctx.font = `${fontSize}px sans-serif`
+        ctx.fillText(`✓ ${quest.name}`, panelX + pad, curY)
+        curY += lineH
+      }
+    }
+
+    if (active.length === 0 && completed.length === 0) {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText('No quests yet.', panelX + pad, curY)
+    }
+  }
+
   // ── Input handling ────────────────────────────────────────────────────────
 
   private getScenePos(e: MouseEvent): { x: number; y: number } {
@@ -1538,6 +1693,28 @@ export class GameRuntime {
       const cb = this.state.dialogCallback
       this.state.dialogCallback = null
       if (cb) cb()
+      return
+    }
+
+    // Quest log close button
+    const rect2 = this.canvas.getBoundingClientRect()
+    const cx2 = (e.clientX - rect2.left) * (this.canvas.width / rect2.width)
+    const cy2 = (e.clientY - rect2.top) * (this.canvas.height / rect2.height)
+
+    if (this.state.questLogOpen) {
+      const cl = this.questLogCloseRect
+      if (cx2 >= cl.x && cx2 <= cl.x + cl.w && cy2 >= cl.y && cy2 <= cl.y + cl.h) {
+        this.state.questLogOpen = false
+        return
+      }
+      // Swallow all other clicks when log is open
+      return
+    }
+
+    // Quest HUD button
+    const qb = this.questButtonRect
+    if (cx2 >= qb.x && cx2 <= qb.x + qb.w && cy2 >= qb.y && cy2 <= qb.y + qb.h) {
+      this.state.questLogOpen = true
       return
     }
 
@@ -1593,6 +1770,13 @@ export class GameRuntime {
     if (!scene) return
     const obj = this.getObjectAt(scene, pos.x, pos.y)
     this.canvas.style.cursor = obj ? 'pointer' : 'default'
+  }
+
+  private handleKeyDown(e: KeyboardEvent) {
+    if (this.state.showTitleScreen || this.state.miniGame) return
+    if (e.key === 'j' || e.key === 'J') {
+      this.state.questLogOpen = !this.state.questLogOpen
+    }
   }
 
   private getObjectAt(scene: Scene, x: number, y: number): SceneObject | null {
@@ -1695,6 +1879,22 @@ export class GameRuntime {
         if (ev) this.executeEvent(ev)
         break
       }
+      case 'add_quest': {
+        const quest = (this.project.quests ?? []).find((q) => q.id === action.value)
+        if (!quest) break
+        if (this.state.activeQuestIds.includes(quest.id) || this.state.completedQuestIds.includes(quest.id)) break
+        this.state.activeQuestIds = [...this.state.activeQuestIds, quest.id]
+        this.state.dialogText = `New Quest: ${quest.name}\n${quest.description}`
+        break
+      }
+      case 'complete_quest': {
+        if (!this.state.activeQuestIds.includes(action.value)) break
+        this.state.activeQuestIds = this.state.activeQuestIds.filter((id) => id !== action.value)
+        this.state.completedQuestIds = [...this.state.completedQuestIds, action.value]
+        const doneQuest = (this.project.quests ?? []).find((q) => q.id === action.value)
+        if (doneQuest) this.state.dialogText = `Quest Complete: ${doneQuest.name}`
+        break
+      }
     }
   }
 
@@ -1743,6 +1943,8 @@ export class GameRuntime {
       activeHotspots:      new Set(this.state.activeHotspots),
       activeTeleportZones: new Set(this.state.activeTeleportZones),
       visitedScenes:       [...this.state.visitedScenes],
+      activeQuestIds:      [...this.state.activeQuestIds],
+      completedQuestIds:   [...this.state.completedQuestIds],
     }
 
     this.state.miniGame = { returnSceneId, instance: null }
@@ -1788,6 +1990,8 @@ export class GameRuntime {
         this.state.activeHotspots      = new Set(snapshot.activeHotspots)
         this.state.activeTeleportZones = new Set(snapshot.activeTeleportZones)
         this.state.visitedScenes       = [...snapshot.visitedScenes]
+        this.state.activeQuestIds      = [...snapshot.activeQuestIds]
+        this.state.completedQuestIds   = [...snapshot.completedQuestIds]
         this.state.dialogText          = null
         this.state.dialogCallback      = null
 

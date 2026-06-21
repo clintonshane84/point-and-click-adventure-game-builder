@@ -29,6 +29,8 @@ import type {
   ScaleZone,
   TeleportZone,
   MiniGame,
+  Quest,
+  QuestObjective,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -223,6 +225,14 @@ interface GameStore {
   addMiniGame: (mg: MiniGame) => void
   updateMiniGame: (id: string, updates: Partial<MiniGame>) => void
   deleteMiniGame: (id: string) => void
+
+  // Quest actions
+  addQuest: (quest: Quest) => void
+  updateQuest: (id: string, updates: Partial<Quest>) => void
+  deleteQuest: (id: string) => void
+  addQuestObjective: (questId: string, objective: QuestObjective) => void
+  updateQuestObjective: (questId: string, objId: string, updates: Partial<QuestObjective>) => void
+  deleteQuestObjective: (questId: string, objId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -999,6 +1009,76 @@ export const useGameStore = create<GameStore>((set) => ({
       project: {
         ...state.project,
         miniGames: (state.project.miniGames ?? []).filter((m) => m.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Quest actions
+  addQuest: (quest) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: [...(state.project.quests ?? []), quest],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateQuest: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) => (q.id === id ? { ...q, ...updates } : q)),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteQuest: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).filter((q) => q.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addQuestObjective: (questId, objective) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) =>
+          q.id === questId ? { ...q, objectives: [...(q.objectives ?? []), objective] } : q
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateQuestObjective: (questId, objId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) =>
+          q.id === questId
+            ? {
+                ...q,
+                objectives: (q.objectives ?? []).map((o) =>
+                  o.id === objId ? { ...o, ...updates } : o
+                ),
+              }
+            : q
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteQuestObjective: (questId, objId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) =>
+          q.id === questId
+            ? { ...q, objectives: (q.objectives ?? []).filter((o) => o.id !== objId) }
+            : q
+        ),
         updatedAt: new Date().toISOString(),
       },
     })),

@@ -103,9 +103,12 @@ export class GameEngine {
     this.frameId = null;
     this.lastFrameTime = 0;
     this.titleScreenButtonRects = [];
+    this.questButtonRect = {x:0,y:0,w:0,h:0};
+    this.questLogCloseRect = {x:0,y:0,w:0,h:0};
     this.state = this._freshState();
     this._boundClick = this._handleClick.bind(this);
     this._boundMove = this._handleMouseMove.bind(this);
+    this._boundKeyDown = this._handleKeyDown.bind(this);
   }
 
   _freshState() {
@@ -126,6 +129,9 @@ export class GameEngine {
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
       miniGame: null,
+      activeQuestIds: [],
+      completedQuestIds: [],
+      questLogOpen: false,
     };
   }
 
@@ -135,6 +141,7 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
+    window.addEventListener('keydown', this._boundKeyDown);
     const gameStartEvs=(this.project.events||[]).filter(e=>this._evTriggers(e).includes('game_start')&&e.enabled);
     gameStartEvs.forEach(e=>this._execEvent(e));
     this._initStageForScene(this.state.currentSceneId);
@@ -224,6 +231,7 @@ export class GameEngine {
     this.state.running = false;
     this.canvas.removeEventListener('click', this._boundClick);
     this.canvas.removeEventListener('mousemove', this._boundMove);
+    window.removeEventListener('keydown', this._boundKeyDown);
     if (this.frameId !== null) { cancelAnimationFrame(this.frameId); this.frameId = null; }
   }
 
@@ -581,6 +589,8 @@ export class GameEngine {
     ctx.restore();
     if (this.state.dialogText) this._renderDialog();
     if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
+    this._renderQuestHUDButton();
+    if(this.state.questLogOpen) this._renderQuestLog();
   }
 
   _renderTitleScreen(){
@@ -742,6 +752,84 @@ export class GameEngine {
     ctx.fillText('\\u25b6 Click to continue',canvas.width-16,by+bh-8);
   }
 
+  _renderQuestHUDButton() {
+    if(this.state.showTitleScreen) return;
+    const {ctx,canvas}=this;
+    const w=52,h=28,x=canvas.width-w-8,y=8;
+    this.questButtonRect={x,y,w,h};
+    ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.strokeStyle='#4f46e5'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e2e8f0';
+    ctx.font='bold '+Math.max(10,Math.min(12,canvas.width/80))+'px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('\u{1F4DC} '+this.state.activeQuestIds.length,x+w/2,y+h/2);
+  }
+
+  _renderQuestLog() {
+    const {ctx,canvas}=this;
+    const pw=Math.min(320,canvas.width*0.85),ph=Math.min(canvas.height*0.78,500);
+    const px=canvas.width-pw-8,py=44;
+    ctx.fillStyle='rgba(15,15,30,0.96)'; ctx.strokeStyle='#4f46e5'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(px,py,pw,ph,8); ctx.fill(); ctx.stroke();
+    const fs=Math.max(11,Math.min(13,canvas.width/70)),lh=fs+6,pad=14;
+    ctx.fillStyle='#e2e8f0'; ctx.font='bold '+(fs+2)+'px sans-serif';
+    ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.fillText('Quest Log',px+pad,py+pad);
+    const cw=22,ch=22,cx2=px+pw-cw-8,cy2=py+8;
+    this.questLogCloseRect={x:cx2,y:cy2,w:cw,h:ch};
+    ctx.fillStyle='#374151'; ctx.beginPath(); ctx.roundRect(cx2,cy2,cw,ch,4); ctx.fill();
+    ctx.fillStyle='#9ca3af'; ctx.font='bold '+fs+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('x',cx2+cw/2,cy2+ch/2);
+    const quests=this.project.quests||[];
+    let curY=py+pad+fs+4+lh;
+    const wrapText=(text,x,mw,startY)=>{
+      ctx.font=fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+      const words=text.split(' '); let line='',y=startY;
+      for(const word of words){
+        const t=line+word+' ';
+        if(ctx.measureText(t).width>mw&&line){ctx.fillText(line.trim(),x,y);line=word+' ';y+=lh;}else{line=t;}
+      }
+      if(line.trim()){ctx.fillText(line.trim(),x,y);y+=lh;} return y;
+    };
+    const active=this.state.activeQuestIds.map(id=>quests.find(q=>q.id===id)).filter(Boolean);
+    if(active.length>0){
+      ctx.fillStyle='#818cf8'; ctx.font='bold '+fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText('Active',px+pad,curY); curY+=lh+2;
+      for(const quest of active){
+        if(curY>py+ph-pad) break;
+        ctx.fillStyle='#e2e8f0'; ctx.font='bold '+fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+        ctx.fillText(quest.name,px+pad,curY); curY+=lh;
+        ctx.fillStyle='#94a3b8';
+        curY=wrapText(quest.description,px+pad,pw-pad*2,curY);
+        for(const obj of quest.objectives||[]){
+          if(curY>py+ph-pad) break;
+          ctx.fillStyle='#6b7280'; ctx.font=fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+          ctx.fillText('  o '+obj.text,px+pad+4,curY); curY+=lh;
+        }
+        curY+=4;
+      }
+    }
+    const completed=this.state.completedQuestIds.map(id=>quests.find(q=>q.id===id)).filter(Boolean);
+    if(completed.length>0&&curY<py+ph-pad){
+      ctx.fillStyle='#6b7280'; ctx.font='bold '+fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText('Completed',px+pad,curY); curY+=lh+2;
+      for(const quest of completed){
+        if(curY>py+ph-pad) break;
+        ctx.fillStyle='#4b5563'; ctx.font=fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+        ctx.fillText('✓ '+quest.name,px+pad,curY); curY+=lh;
+      }
+    }
+    if(active.length===0&&completed.length===0){
+      ctx.fillStyle='#6b7280'; ctx.font=fs+'px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText('No quests yet.',px+pad,curY);
+    }
+  }
+
+  _handleKeyDown(e) {
+    if(this.state.showTitleScreen||this.state.miniGame) return;
+    if(e.key==='j'||e.key==='J') this.state.questLogOpen=!this.state.questLogOpen;
+  }
+
   _scenePos(e) {
     const r=this.canvas.getBoundingClientRect();
     const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
@@ -766,6 +854,16 @@ export class GameEngine {
       const cb=this.state.dialogCallback; this.state.dialogCallback=null; if(cb)cb();
       return;
     }
+    const r2=this.canvas.getBoundingClientRect();
+    const cx2=(e.clientX-r2.left)*(this.canvas.width/r2.width);
+    const cy2=(e.clientY-r2.top)*(this.canvas.height/r2.height);
+    if(this.state.questLogOpen){
+      const cl=this.questLogCloseRect;
+      if(cx2>=cl.x&&cx2<=cl.x+cl.w&&cy2>=cl.y&&cy2<=cl.y+cl.h){this.state.questLogOpen=false;return;}
+      return;
+    }
+    const qb=this.questButtonRect;
+    if(cx2>=qb.x&&cx2<=qb.x+qb.w&&cy2>=qb.y&&cy2<=qb.y+qb.h){this.state.questLogOpen=true;return;}
     const pos=this._scenePos(e);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
     if (!scene) return;
@@ -870,6 +968,22 @@ export class GameEngine {
       case 'trigger_event':{
         const ev=(this.project.events||[]).find(e=>e.id===action.value);
         if(ev) this._execEvent(ev);
+        break;
+      }
+      case 'add_quest':{
+        const quest=(this.project.quests||[]).find(q=>q.id===action.value);
+        if(!quest) break;
+        if(this.state.activeQuestIds.includes(quest.id)||this.state.completedQuestIds.includes(quest.id)) break;
+        this.state.activeQuestIds=[...this.state.activeQuestIds,quest.id];
+        this.state.dialogText='New Quest: '+quest.name+'\n'+quest.description;
+        break;
+      }
+      case 'complete_quest':{
+        if(!this.state.activeQuestIds.includes(action.value)) break;
+        this.state.activeQuestIds=this.state.activeQuestIds.filter(id=>id!==action.value);
+        this.state.completedQuestIds=[...this.state.completedQuestIds,action.value];
+        const doneQ=(this.project.quests||[]).find(q=>q.id===action.value);
+        if(doneQ) this.state.dialogText='Quest Complete: '+doneQ.name;
         break;
       }
     }
@@ -1077,6 +1191,8 @@ export class GameEngine {
       activeHotspots:new Set(this.state.activeHotspots),
       activeTeleportZones:new Set(this.state.activeTeleportZones),
       visitedScenes:[...this.state.visitedScenes],
+      activeQuestIds:[...this.state.activeQuestIds],
+      completedQuestIds:[...this.state.completedQuestIds],
     };
     this.state.miniGame={returnSceneId,instance:null};
     if(this.frameId!==null){cancelAnimationFrame(this.frameId);this.frameId=null;}
@@ -1103,6 +1219,8 @@ export class GameEngine {
         this.state.activeHotspots=new Set(snapshot.activeHotspots);
         this.state.activeTeleportZones=new Set(snapshot.activeTeleportZones);
         this.state.visitedScenes=[...snapshot.visitedScenes];
+        this.state.activeQuestIds=[...snapshot.activeQuestIds];
+        this.state.completedQuestIds=[...snapshot.completedQuestIds];
         this.state.dialogText=null;
         this.state.dialogCallback=null;
         if(vars) Object.assign(this.state.variables,vars);

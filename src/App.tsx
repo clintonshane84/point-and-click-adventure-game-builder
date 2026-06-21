@@ -12,6 +12,7 @@ import { SettingsEditor } from './editors/SettingsEditor'
 import { TitleScreenEditor } from './editors/TitleScreenEditor'
 import { StageEditor } from './editors/StageEditor'
 import { GoalEditor } from './editors/GoalEditor'
+import { QuestEditor } from './editors/QuestEditor'
 import { CursorEditor } from './editors/CursorEditor'
 import { CharacterEditor } from './editors/CharacterEditor'
 import { CinematicEditor } from './editors/CinematicEditor'
@@ -52,6 +53,7 @@ function App() {
       case 'titlescreen': return <TitleScreenEditor />
       case 'stage':       return <StageEditor />
       case 'goal':        return <GoalEditor />
+      case 'quest':       return <QuestEditor />
       case 'cursor':      return <CursorEditor />
       case 'character':   return <CharacterEditor />
       case 'cinematic':   return <CinematicEditor />
