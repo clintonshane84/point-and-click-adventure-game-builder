@@ -618,13 +618,13 @@ export function EventEditor() {
     }))
 
     if (scope === 'scene') {
-      if (!selectedObjId || form.triggers.length === 0) return
+      if ((!editingEventId && !selectedObjId) || form.triggers.length === 0) return
       const primaryTrigger = form.triggers[0]
       const extraTriggers = form.triggers.slice(1)
       newEvent = {
         id: `event-${ts}`,
         sceneId: selectedSceneId,
-        objectId: selectedObjId,
+        objectId: selectedObjId ?? '',
         trigger: primaryTrigger,
         ...(extraTriggers.length > 0 ? { triggers: extraTriggers } : {}),
         actions: baseActions,
