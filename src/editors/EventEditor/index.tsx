@@ -124,26 +124,40 @@ function ActionValueEditor({
     )
   }
   if (action.type === 'set_variable') {
-    const eqIdx = action.value.indexOf('=')
-    const varName = eqIdx !== -1 ? action.value.slice(0, eqIdx) : action.value
-    const varVal  = eqIdx !== -1 ? action.value.slice(eqIdx + 1) : ''
-    const setVarValue = (name: string, val: string) => update({ value: `${name}=${val}` })
+    let op = '=', varName = '', varVal = ''
+    const addIdx = action.value.indexOf('+=')
+    const subIdx = action.value.indexOf('-=')
+    if (addIdx !== -1) {
+      op = '+='; varName = action.value.slice(0, addIdx).trim(); varVal = action.value.slice(addIdx + 2).trim()
+    } else if (subIdx !== -1) {
+      op = '-='; varName = action.value.slice(0, subIdx).trim(); varVal = action.value.slice(subIdx + 2).trim()
+    } else {
+      const eqIdx = action.value.indexOf('=')
+      if (eqIdx !== -1) { varName = action.value.slice(0, eqIdx).trim(); varVal = action.value.slice(eqIdx + 1).trim() }
+      else { varName = action.value }
+    }
+    const rebuild = (name: string, operator: string, val: string) => update({ value: `${name}${operator}${val}` })
     return (
       <div className="flex gap-2">
         <div className="flex-1">
           <input type="text" list={`var-names-${idx}`} value={varName}
-            onChange={(e) => setVarValue(e.target.value, varVal)}
+            onChange={(e) => rebuild(e.target.value, op, varVal)}
             placeholder="variableName"
             className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono" />
           <datalist id={`var-names-${idx}`}>
             {allStageVarNames.map((n) => <option key={n} value={n} />)}
           </datalist>
         </div>
-        <span className="text-gray-500 self-center">=</span>
+        <select value={op} onChange={(e) => rebuild(varName, e.target.value, varVal)}
+          className="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono">
+          <option value="=">=</option>
+          <option value="+=">+=</option>
+          <option value="-=">-=</option>
+        </select>
         <input type="text" value={varVal}
-          onChange={(e) => setVarValue(varName, e.target.value)}
-          placeholder="value"
-          className="w-28 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
+          onChange={(e) => rebuild(varName, op, e.target.value)}
+          placeholder={op === '=' ? 'value' : 'number'}
+          className="w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
       </div>
     )
   }
