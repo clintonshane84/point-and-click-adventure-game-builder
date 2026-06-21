@@ -1042,8 +1042,8 @@ export class GameRuntime {
         }
       }
       ns.scale = npcScale
-      const scaledNpcW = npc.width * npcScale
-      const scaledNpcH = npc.height * npcScale
+      const scaledNpcW = obj.width * npcScale
+      const scaledNpcH = obj.height * npcScale
 
       // ── Behavior decisions ────────────────────────────────────────────────────
       ns.behaviorTimer = Math.max(0, ns.behaviorTimer - dt)

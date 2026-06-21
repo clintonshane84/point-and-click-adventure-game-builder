@@ -634,7 +634,7 @@ export class GameEngine {
       let npcScale=1;
       for(const z of (scene.scaleZones||[])){if(npcFX>=z.x&&npcFX<=z.x+z.width&&npcFY>=z.y&&npcFY<=z.y+z.height){npcScale=z.scale;break;}}
       ns.scale=npcScale;
-      const snW=npc.width*npcScale,snH=npc.height*npcScale;
+      const snW=obj.width*npcScale,snH=obj.height*npcScale;
       ns.behaviorTimer=Math.max(0,ns.behaviorTimer-dt);
       if(ns.behaviorPhase==='idle'&&ns.behaviorTimer<=0){
         if(instr==='roam-slow-and-eat-grass'){
