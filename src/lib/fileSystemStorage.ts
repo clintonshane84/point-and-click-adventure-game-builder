@@ -4,17 +4,21 @@
  * Three-layer save/load strategy:
  *  1. File System Access API  — writes directly to a user-chosen folder on disk,
  *     handle persisted in IndexedDB so subsequent saves need no prompt.
+ *     When a file is loaded via the open picker the file handle is stored so
+ *     subsequent saves overwrite the same file rather than creating a new one.
  *  2. Browser download / file-input — fallback for browsers without FSA.
- *  3. localStorage auto-save — runs every 60 s; offered as recovery on startup.
+ *  3. localStorage auto-save — runs every 60 s while a file is open; restored
+ *     automatically on next session startup.
  */
 
 import type { GameProject } from '../types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const IDB_DB      = 'adventure-game-builder-v1'
-const IDB_STORE   = 'handles'
-const IDB_DIR_KEY = 'project-directory'
+const IDB_DB       = 'adventure-game-builder-v1'
+const IDB_STORE    = 'handles'
+const IDB_DIR_KEY  = 'project-directory'
+const IDB_FILE_KEY = 'current-file-handle'   // stores the last-opened FileSystemFileHandle
 
 const LS_PROJECT_KEY = 'agb-autosave'
 const LS_TIME_KEY    = 'agb-autosave-time'
@@ -54,6 +58,23 @@ async function idbSet(key: string, value: unknown): Promise<void> {
     tx.oncomplete = () => resolve()
     tx.onerror    = () => reject(tx.error)
   })
+}
+
+// ── File handle storage (for overwrite-save) ──────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FileHandle = any  // FileSystemFileHandle — typed loosely for cross-browser TS compat
+
+export async function saveFileHandle(h: FileHandle): Promise<void> {
+  try { await idbSet(IDB_FILE_KEY, h) } catch { /* ignore */ }
+}
+
+export async function getFileHandle(): Promise<FileHandle | null> {
+  try { return await idbGet<FileHandle>(IDB_FILE_KEY) } catch { return null }
+}
+
+export async function clearFileHandle(): Promise<void> {
+  try { await idbSet(IDB_FILE_KEY, null) } catch { /* ignore */ }
 }
 
 // ── Directory handle management ────────────────────────────────────────────────
@@ -117,38 +138,59 @@ export async function getSavedDirectoryName(): Promise<string | null> {
 // ── Save ──────────────────────────────────────────────────────────────────────
 
 export type SaveResult =
-  | { ok: true;  path: string;  method: 'fsa' | 'download' }
+  | { ok: true;  path: string;  method: 'fsa-file' | 'fsa-dir' | 'download' }
   | { ok: false; error: string }
 
 /**
  * Save the project.
  *
- * With FSA: writes `[project-name].agb.json` to the chosen folder.
- *           On first save the folder-picker opens; subsequent saves are silent.
- *
- * Without FSA: triggers a browser download to the downloads folder.
+ * Priority order:
+ *  1. Overwrite the last-opened file (stored FileSystemFileHandle) — silent.
+ *  2. Write to the chosen FSA directory — silent if permission held, prompts otherwise.
+ *  3. Trigger a browser download — always works as fallback.
  */
 export async function saveProject(project: GameProject): Promise<SaveResult> {
   const json     = JSON.stringify(project, null, 2)
   const filename = `${slugify(project.name || 'my-adventure-game')}.agb.json`
 
   if (fsaSupported) {
+    // 1. Try the stored file handle (overwrite the file that was last opened/saved)
+    const fh = await getFileHandle()
+    if (fh) {
+      try {
+        const perm = await fh.queryPermission({ mode: 'readwrite' })
+        const granted =
+          perm === 'granted' ||
+          (await fh.requestPermission({ mode: 'readwrite' })) === 'granted'
+        if (granted) {
+          const writable = await fh.createWritable()
+          await writable.write(json)
+          await writable.close()
+          return { ok: true, path: fh.name as string, method: 'fsa-file' }
+        }
+      } catch {
+        // Permission revoked or handle stale — fall through to directory approach
+      }
+    }
+
+    // 2. Write to the chosen FSA directory
     try {
       const dirHandle  = await getOrPickDirectory()
       const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
       const writable   = await fileHandle.createWritable()
       await writable.write(json)
       await writable.close()
-      return { ok: true, path: `${dirHandle.name as string}/${filename}`, method: 'fsa' }
+      // Store this file handle so next save is a direct overwrite
+      await saveFileHandle(fileHandle)
+      return { ok: true, path: `${dirHandle.name as string}/${filename}`, method: 'fsa-dir' }
     } catch (err) {
       const name = (err as Error).name
       if (name === 'AbortError') return { ok: false, error: 'cancelled' }
-      // Unexpected error — fall through to download
       console.warn('FSA save failed, falling back to download:', err)
     }
   }
 
-  // Fallback: browser download
+  // 3. Fallback: browser download
   triggerDownload(json, filename)
   return { ok: true, path: filename, method: 'download' }
 }
@@ -178,7 +220,12 @@ export async function loadProject(): Promise<LoadResult> {
         multiple: false,
       })
       const file = await fileHandle.getFile()
-      return parseProjectFile(file)
+      const result = await parseProjectFile(file)
+      if (result.ok) {
+        // Remember this handle so Save will overwrite the same file
+        await saveFileHandle(fileHandle)
+      }
+      return result
     } catch (err) {
       const name = (err as Error).name
       if (name === 'AbortError') return { ok: false, error: 'cancelled' }
@@ -231,13 +278,24 @@ export function autoSave(project: GameProject): void {
 export async function autoSaveToFile(project: GameProject): Promise<boolean> {
   if (!fsaSupported) return false
   try {
-    const handle = await getSavedDirHandle()
-    if (!handle) return false
-    // Do NOT call requestPermission here — we never want to prompt mid-session.
-    const perm = await handle.queryPermission({ mode: 'readwrite' })
+    // Prefer writing to the stored file handle (overwrite same file)
+    const fh = await getFileHandle()
+    if (fh) {
+      const perm = await fh.queryPermission({ mode: 'readwrite' })
+      if (perm === 'granted') {
+        const writable = await fh.createWritable()
+        await writable.write(JSON.stringify(project, null, 2))
+        await writable.close()
+        return true
+      }
+    }
+    // Fall back to directory-based auto-save
+    const dirHandle = await getSavedDirHandle()
+    if (!dirHandle) return false
+    const perm = await dirHandle.queryPermission({ mode: 'readwrite' })
     if (perm !== 'granted') return false
     const filename = `${slugify(project.name || 'my-adventure-game')}.agb.json`
-    const fileHandle = await handle.getFileHandle(filename, { create: true })
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true })
     const writable = await fileHandle.createWritable()
     await writable.write(JSON.stringify(project, null, 2))
     await writable.close()

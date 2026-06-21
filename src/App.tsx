@@ -23,19 +23,23 @@ import { saveProject, autoSave } from './lib/fileSystemStorage'
 function App() {
   const activeEditor = useGameStore((s) => s.activeEditor)
   const project      = useGameStore((s) => s.project)
+  const setFileOpen  = useGameStore((s) => s.setFileOpen)
 
   // Ctrl/Cmd + S → save
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    const handler = async (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
-        saveProject(project)
-        autoSave(project)
+        const result = await saveProject(project)
+        if (result.ok) {
+          setFileOpen(true)
+          autoSave(project)
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [project])
+  }, [project, setFileOpen])
 
   const renderEditor = () => {
     switch (activeEditor) {

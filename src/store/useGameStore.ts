@@ -120,7 +120,9 @@ const defaultProject: GameProject = {
 interface GameStore {
   project: GameProject
   activeEditor: EditorType
+  fileOpen: boolean
   setActiveEditor: (editor: EditorType) => void
+  setFileOpen: (open: boolean) => void
   loadProject: (project: GameProject) => void
 
   // Scene actions
@@ -226,8 +228,10 @@ interface GameStore {
 export const useGameStore = create<GameStore>((set) => ({
   project: defaultProject,
   activeEditor: 'scene',
+  fileOpen: false,
 
   setActiveEditor: (editor) => set({ activeEditor: editor }),
+  setFileOpen: (open) => set({ fileOpen: open }),
 
   loadProject: (project) =>
     set({
