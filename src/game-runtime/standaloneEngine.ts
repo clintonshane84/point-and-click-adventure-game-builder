@@ -99,6 +99,7 @@ export class GameEngine {
     this.objectVisibility = new Map();
     this.removedObjects = new Set();
     this.activeCollisions = new Set();
+    this.repeatCounts = new Map();
     this.frameId = null;
     this.lastFrameTime = 0;
     this.titleScreenButtonRects = [];
@@ -231,6 +232,7 @@ export class GameEngine {
     this.objectVisibility.clear();
     this.removedObjects.clear();
     this.activeCollisions.clear();
+    this.repeatCounts.clear();
     this.imageCache.clear();
     this.state = this._freshState();
     this.start();
@@ -1060,9 +1062,10 @@ export class GameEngine {
     return mod.default;
   }
 
-  async _launchMiniGame(action){
+  async _launchMiniGame(action,isRepeat=false){
     const mg=(this.project.miniGames||[]).find(m=>m.id===action.value);
     if(!mg?.source) return;
+    if(!isRepeat) this.repeatCounts.delete(action.id);
     const returnSceneId=this.state.currentSceneId;
     const snapshot={
       variables:{...this.state.variables},
@@ -1104,11 +1107,23 @@ export class GameEngine {
         this.state.dialogCallback=null;
         if(vars) Object.assign(this.state.variables,vars);
         this.state.variables['minigame_result']=result;
+        const resultActions=result==='win'?(action.onWinActions||[]):result==='lose'?(action.onLoseActions||[]):(action.onExitActions||[]);
+        resultActions.forEach(a=>this._execAction(a));
+        const hasAsyncAction=resultActions.some(a=>a.type==='launch_minigame');
+        const repeatMatches=action.repeatOnResult==='any'||action.repeatOnResult===result;
+        if(repeatMatches&&!hasAsyncAction){
+          const count=this.repeatCounts.get(action.id)??0;
+          const maxRepeats=action.repeatMax??0;
+          if(maxRepeats===0||count<maxRepeats){
+            this.repeatCounts.set(action.id,count+1);
+            this._launchMiniGame(action,true);
+            return;
+          }
+          this.repeatCounts.delete(action.id);
+        }
         this.state.running=true;
         this.lastFrameTime=0;
         this._loop();
-        const resultActions=result==='win'?(action.onWinActions||[]):result==='lose'?(action.onLoseActions||[]):(action.onExitActions||[]);
-        resultActions.forEach(a=>this._execAction(a));
       };
       const spriteMap={};
       const spriteFrames={};

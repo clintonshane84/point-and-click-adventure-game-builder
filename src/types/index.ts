@@ -178,6 +178,8 @@ export interface EventAction {
   onWinActions?: EventAction[]   // launch_minigame: actions to run when result === 'win'
   onLoseActions?: EventAction[]  // launch_minigame: actions to run when result === 'lose'
   onExitActions?: EventAction[]  // launch_minigame: actions to run when result === 'exit'
+  repeatOnResult?: 'lose' | 'exit' | 'any'  // launch_minigame: re-launch this game on matching result
+  repeatMax?: number                          // launch_minigame: max re-launches (0 = infinite)
 }
 
 export interface EventCondition {

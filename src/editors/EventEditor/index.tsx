@@ -64,6 +64,8 @@ interface FormAction {
   onWinActions?: FormAction[]
   onLoseActions?: FormAction[]
   onExitActions?: FormAction[]
+  repeatOnResult?: 'lose' | 'exit' | 'any'
+  repeatMax?: number
 }
 type FormCondition = Omit<EventCondition, never>
 type FormBranch = { id: string; conditions: FormCondition[]; logic: 'AND' | 'OR'; actions: FormAction[] }
@@ -88,6 +90,8 @@ function deserializeAction(a: EventAction): FormAction {
     ...(a.onWinActions?.length  ? { onWinActions:  a.onWinActions.map(deserializeAction)  } : {}),
     ...(a.onLoseActions?.length ? { onLoseActions: a.onLoseActions.map(deserializeAction) } : {}),
     ...(a.onExitActions?.length ? { onExitActions: a.onExitActions.map(deserializeAction) } : {}),
+    ...(a.repeatOnResult        ? { repeatOnResult: a.repeatOnResult }                     : {}),
+    ...(a.repeatMax    != null  ? { repeatMax: a.repeatMax }                               : {}),
   }
 }
 
@@ -157,6 +161,52 @@ function ActionValueEditor({
             />
           </div>
         ))}
+        {/* Repeat options */}
+        <div className="border border-gray-700 rounded p-2 space-y-2">
+          <p className="text-xs font-semibold text-gray-400">Repeat</p>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-300 w-20 flex-shrink-0">Repeat on</label>
+            <select
+              value={action.repeatOnResult ?? ''}
+              onChange={(e) => update({ repeatOnResult: (e.target.value || undefined) as FormAction['repeatOnResult'] })}
+              className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="">— no repeat —</option>
+              <option value="lose">Lose</option>
+              <option value="exit">Exit</option>
+              <option value="any">Any result</option>
+            </select>
+          </div>
+          {action.repeatOnResult && (
+            <>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-300 w-20 flex-shrink-0">Max repeats</label>
+                <input
+                  type="number" min="0"
+                  value={action.repeatMax ?? 0}
+                  onChange={(e) => update({ repeatMax: Number(e.target.value) })}
+                  className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-xs text-gray-500">0 = infinite</span>
+              </div>
+              {(() => {
+                const conflictList =
+                  action.repeatOnResult === 'lose' ? (action.onLoseActions ?? []) :
+                  action.repeatOnResult === 'exit' ? (action.onExitActions ?? []) :
+                  [...(action.onWinActions ?? []), ...(action.onLoseActions ?? []), ...(action.onExitActions ?? [])]
+                return conflictList.some((a) => a.type === 'launch_minigame') ? (
+                  <p className="text-xs text-yellow-400">
+                    ⚠ Repeat won't fire when the result actions already contain a Launch Mini-Game. To loop between two mini-games, use a Trigger Event action in the result actions pointing to the event that starts the first game.
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    Tip: to loop between two mini-games (e.g. lose MG2 → back to MG1), add a Trigger Event action in the result actions pointing to the event that launches MG1.
+                  </p>
+                )
+              })()}
+            </>
+          )}
+        </div>
       </div>
     )
   }
@@ -551,6 +601,8 @@ export function EventEditor() {
       ...(a.onWinActions?.length  ? { onWinActions:  a.onWinActions.map((wa, wi) => serializeAction(wa, `${id}-win-${wi}`))  } : {}),
       ...(a.onLoseActions?.length ? { onLoseActions: a.onLoseActions.map((la, li) => serializeAction(la, `${id}-lose-${li}`)) } : {}),
       ...(a.onExitActions?.length ? { onExitActions: a.onExitActions.map((ea, ei) => serializeAction(ea, `${id}-exit-${ei}`)) } : {}),
+      ...(a.repeatOnResult        ? { repeatOnResult: a.repeatOnResult }                : {}),
+      ...(a.repeatMax    != null  ? { repeatMax: a.repeatMax }                         : {}),
     })
     const baseActions = form.actions.map((a, i) => serializeAction(a, `action-${ts}-${i}`))
     const baseBranches: EventBranch[] = form.branches.map((br, bi) => ({

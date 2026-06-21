@@ -85,6 +85,7 @@ export class GameRuntime {
   private objectVisibility = new Map<string, boolean>()
   private removedObjects = new Set<string>()
   private activeCollisions = new Set<string>()
+  private repeatCounts = new Map<string, number>()
   private frameId: number | null = null
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
@@ -284,6 +285,7 @@ export class GameRuntime {
     this.objectVisibility.clear()
     this.removedObjects.clear()
     this.activeCollisions.clear()
+    this.repeatCounts.clear()
     this.imageCache.clear()
     this.state = this.freshState()
     this.start()
@@ -1717,9 +1719,11 @@ export class GameRuntime {
     return mod.default
   }
 
-  private async launchMiniGame(action: EventAction) {
+  private async launchMiniGame(action: EventAction, isRepeat = false) {
     const mg = (this.project.miniGames ?? []).find((m) => m.id === action.value)
     if (!mg?.source) return
+
+    if (!isRepeat) this.repeatCounts.delete(action.id)
 
     const returnSceneId = this.state.currentSceneId
 
@@ -1791,16 +1795,33 @@ export class GameRuntime {
         if (vars) Object.assign(this.state.variables, vars)
         this.state.variables['minigame_result'] = result
 
-        this.state.running = true
-        this.lastFrameTime = 0
-        this.renderLoop()
-
         // Execute result-specific post-game actions
         const resultActions =
           result === 'win'  ? (action.onWinActions  ?? []) :
           result === 'lose' ? (action.onLoseActions ?? []) :
                               (action.onExitActions ?? [])
         resultActions.forEach((a) => this.executeAction(a))
+
+        // Repeat logic — skip if result actions already contain an async launch_minigame
+        const hasAsyncAction = resultActions.some((a) => a.type === 'launch_minigame')
+        const repeatMatches =
+          action.repeatOnResult === 'any' ||
+          action.repeatOnResult === result
+
+        if (repeatMatches && !hasAsyncAction) {
+          const count = this.repeatCounts.get(action.id) ?? 0
+          const maxRepeats = action.repeatMax ?? 0  // 0 = infinite
+          if (maxRepeats === 0 || count < maxRepeats) {
+            this.repeatCounts.set(action.id, count + 1)
+            this.launchMiniGame(action, true)
+            return
+          }
+          this.repeatCounts.delete(action.id)
+        }
+
+        this.state.running = true
+        this.lastFrameTime = 0
+        this.renderLoop()
       }
 
       const spriteMap: Record<string, string> = {}
