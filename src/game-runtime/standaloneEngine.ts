@@ -776,7 +776,28 @@ export class GameEngine {
       .find(o=>x>=o.x&&x<=o.x+o.width&&y>=o.y&&y<=o.y+o.height)||null;
   }
 
-  _execEvent(ev){ev.actions.forEach(a=>this._execAction(a));}
+  _checkEventCond(c){
+    const raw=this.state.variables[c.variable];
+    const v=raw!==undefined?String(raw):'';
+    switch(c.operator){
+      case 'equals':       return v===c.value;
+      case 'not_equals':   return v!==c.value;
+      case 'greater_than': return Number(v)>Number(c.value);
+      case 'less_than':    return Number(v)<Number(c.value);
+      case 'contains':     return v.includes(c.value);
+      default:             return false;
+    }
+  }
+
+  _execEvent(ev){
+    for(const br of (ev.branches||[])){
+      if(!br.conditions?.length) continue;
+      const results=br.conditions.map(c=>this._checkEventCond(c));
+      const matched=br.logic==='AND'?results.every(Boolean):results.some(Boolean);
+      if(matched){br.actions.forEach(a=>this._execAction(a));return;}
+    }
+    ev.actions.forEach(a=>this._execAction(a));
+  }
 
   _execAction(action){
     switch(action.type){

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, Trash2, Zap, ChevronDown, ChevronUp, Globe, BookOpen } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { EventTrigger, EventAction, TriggerType, ActionType, FacingDirection, Scene, Cinematic, MiniGame } from '../../types'
+import type { EventTrigger, EventAction, EventCondition, EventBranch, TriggerType, ActionType, ConditionOperator, FacingDirection, Scene, Cinematic, MiniGame } from '../../types'
 
 type EventScope = 'scene' | 'stage' | 'global'
 
@@ -46,28 +46,33 @@ const ACTION_LABELS: Record<ActionType, string> = {
   launch_minigame:'Launch Mini-Game',
 }
 
+type FormAction = Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing'>
+type FormCondition = Omit<EventCondition, never>
+type FormBranch = { id: string; conditions: FormCondition[]; logic: 'AND' | 'OR'; actions: FormAction[] }
+
 interface EventFormState {
   trigger: TriggerType
-  actions: Array<Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing'>>
+  actions: FormAction[]
+  branches: FormBranch[]
 }
 
 // ── Shared action value editor (used both in form and inline editing) ─────────
 function ActionValueEditor({
-  action, idx, form, setForm, scenes, cinematics, miniGames, allStageVarNames,
+  action, idx, actions, onActionsChange, scenes, cinematics, miniGames, allStageVarNames,
 }: {
-  action: EventFormState['actions'][number]
+  action: FormAction
   idx: number
-  form: EventFormState
-  setForm: React.Dispatch<React.SetStateAction<EventFormState>>
+  actions: FormAction[]
+  onActionsChange: (actions: FormAction[]) => void
   scenes: Scene[]
   cinematics: Cinematic[]
   miniGames: MiniGame[]
   allStageVarNames: string[]
 }) {
-  const update = (patch: Partial<EventFormState['actions'][number]>) => {
-    const updated = [...form.actions]
+  const update = (patch: Partial<FormAction>) => {
+    const updated = [...actions]
     updated[idx] = { ...updated[idx], ...patch }
-    setForm((f) => ({ ...f, actions: updated }))
+    onActionsChange(updated)
   }
 
   if (action.type === 'play_cinematic') {
@@ -168,36 +173,37 @@ function ActionValueEditor({
   )
 }
 
-// ── Actions editor panel (used inside the Add Event modal) ────────────────────
+// ── Actions editor panel ──────────────────────────────────────────────────────
 function ActionsEditor({
-  form, setForm, scenes, cinematics, miniGames, allStageVarNames,
+  actions, onActionsChange, scenes, cinematics, miniGames, allStageVarNames, label,
 }: {
-  form: EventFormState
-  setForm: React.Dispatch<React.SetStateAction<EventFormState>>
+  actions: FormAction[]
+  onActionsChange: (actions: FormAction[]) => void
   scenes: Scene[]
   cinematics: Cinematic[]
   miniGames: MiniGame[]
   allStageVarNames: string[]
+  label?: string
 }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="text-xs text-gray-400 font-semibold">Actions</label>
+        <label className="text-xs text-gray-400 font-semibold">{label ?? 'Actions'}</label>
         <button
-          onClick={() => setForm((f) => ({ ...f, actions: [...f.actions, { type: 'set_variable' as ActionType, value: '' }] }))}
+          onClick={() => onActionsChange([...actions, { type: 'set_variable' as ActionType, value: '' }])}
           className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
         >
           <Plus size={12} /> Add
         </button>
       </div>
-      {form.actions.map((action, idx) => (
+      {actions.map((action, idx) => (
         <div key={idx} className="flex gap-2 items-start">
           <div className="flex-1 space-y-1.5">
             <select value={action.type}
               onChange={(e) => {
-                const updated = [...form.actions]
+                const updated = [...actions]
                 updated[idx] = { ...updated[idx], type: e.target.value as ActionType }
-                setForm((f) => ({ ...f, actions: updated }))
+                onActionsChange(updated)
               }}
               className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
               {(Object.keys(ACTION_LABELS) as ActionType[]).map((a) => (
@@ -205,17 +211,146 @@ function ActionsEditor({
               ))}
             </select>
             <ActionValueEditor
-              action={action} idx={idx} form={form} setForm={setForm}
+              action={action} idx={idx} actions={actions} onActionsChange={onActionsChange}
               scenes={scenes} cinematics={cinematics} miniGames={miniGames}
               allStageVarNames={allStageVarNames}
             />
           </div>
           <button
-            onClick={() => setForm((f) => ({ ...f, actions: f.actions.filter((_, i) => i !== idx) }))}
+            onClick={() => onActionsChange(actions.filter((_, i) => i !== idx))}
             className="mt-1 text-gray-500 hover:text-red-400"
           >
             <Trash2 size={14} />
           </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Branch editor ─────────────────────────────────────────────────────────────
+const OPERATOR_LABELS: Record<ConditionOperator, string> = {
+  equals:       '=',
+  not_equals:   '≠',
+  greater_than: '>',
+  less_than:    '<',
+  contains:     'contains',
+}
+
+function BranchesEditor({
+  branches, onBranchesChange, scenes, cinematics, miniGames, allStageVarNames,
+}: {
+  branches: FormBranch[]
+  onBranchesChange: (branches: FormBranch[]) => void
+  scenes: Scene[]
+  cinematics: Cinematic[]
+  miniGames: MiniGame[]
+  allStageVarNames: string[]
+}) {
+  const addBranch = () => {
+    const id = `br-${Date.now()}`
+    onBranchesChange([...branches, {
+      id,
+      conditions: [{ id: `cond-${Date.now()}`, variable: '', operator: 'equals', value: '' }],
+      logic: 'AND',
+      actions: [{ type: 'set_variable', value: '' }],
+    }])
+  }
+
+  const updateBranch = (i: number, patch: Partial<FormBranch>) => {
+    const updated = [...branches]
+    updated[i] = { ...updated[i], ...patch }
+    onBranchesChange(updated)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-xs text-gray-400 font-semibold">Conditional Branches</label>
+        <button onClick={addBranch} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+          <Plus size={12} /> Add Branch
+        </button>
+      </div>
+      {branches.length === 0 && (
+        <p className="text-xs text-gray-600 italic">No branches yet. Add a branch to run different actions when a condition is met.</p>
+      )}
+      {branches.map((branch, bi) => (
+        <div key={branch.id} className="border border-indigo-800 rounded-lg overflow-hidden">
+          {/* Branch header */}
+          <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-950">
+            <span className="text-xs font-semibold text-indigo-400">Branch {bi + 1}</span>
+            <button onClick={() => onBranchesChange(branches.filter((_, i) => i !== bi))}
+              className="text-gray-500 hover:text-red-400"><Trash2 size={12} /></button>
+          </div>
+          {/* Conditions */}
+          <div className="px-3 py-2 space-y-1.5 bg-gray-850 border-b border-gray-700">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-gray-400">If</span>
+              {branch.conditions.length > 1 && (
+                <div className="flex gap-1">
+                  {(['AND', 'OR'] as const).map((l) => (
+                    <button key={l} onClick={() => updateBranch(bi, { logic: l })}
+                      className={`text-xs px-2 py-0.5 rounded ${branch.logic === l ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {branch.conditions.map((cond, ci) => (
+              <div key={cond.id} className="flex gap-1.5 items-center">
+                <input type="text" value={cond.variable}
+                  onChange={(e) => {
+                    const conds = [...branch.conditions]
+                    conds[ci] = { ...conds[ci], variable: e.target.value }
+                    updateBranch(bi, { conditions: conds })
+                  }}
+                  placeholder="variable"
+                  list={`br-vars-${bi}-${ci}`}
+                  className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500 font-mono" />
+                <datalist id={`br-vars-${bi}-${ci}`}>
+                  {allStageVarNames.map((n) => <option key={n} value={n} />)}
+                </datalist>
+                <select value={cond.operator}
+                  onChange={(e) => {
+                    const conds = [...branch.conditions]
+                    conds[ci] = { ...conds[ci], operator: e.target.value as ConditionOperator }
+                    updateBranch(bi, { conditions: conds })
+                  }}
+                  className="bg-gray-700 border border-gray-600 rounded px-1.5 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500">
+                  {(Object.keys(OPERATOR_LABELS) as ConditionOperator[]).map((op) => (
+                    <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>
+                  ))}
+                </select>
+                <input type="text" value={cond.value}
+                  onChange={(e) => {
+                    const conds = [...branch.conditions]
+                    conds[ci] = { ...conds[ci], value: e.target.value }
+                    updateBranch(bi, { conditions: conds })
+                  }}
+                  placeholder="value"
+                  className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500" />
+                <button onClick={() => updateBranch(bi, { conditions: branch.conditions.filter((_, i) => i !== ci) })}
+                  className="text-gray-500 hover:text-red-400 flex-shrink-0"><Trash2 size={11} /></button>
+              </div>
+            ))}
+            <button onClick={() => {
+              const newCond: FormCondition = { id: `cond-${Date.now()}`, variable: '', operator: 'equals', value: '' }
+              updateBranch(bi, { conditions: [...branch.conditions, newCond] })
+            }} className="text-xs text-gray-500 hover:text-indigo-400 flex items-center gap-1">
+              <Plus size={10} /> Add condition
+            </button>
+          </div>
+          {/* Branch actions */}
+          <div className="px-3 py-2">
+            <p className="text-xs text-gray-500 mb-2">Then run:</p>
+            <ActionsEditor
+              actions={branch.actions}
+              onActionsChange={(a) => updateBranch(bi, { actions: a })}
+              scenes={scenes} cinematics={cinematics} miniGames={miniGames}
+              allStageVarNames={allStageVarNames}
+            />
+          </div>
         </div>
       ))}
     </div>
@@ -242,6 +377,7 @@ export function EventEditor() {
   const [form, setForm]                 = useState<EventFormState>({
     trigger: 'click',
     actions: [{ type: 'set_variable', value: '' }],
+    branches: [],
   })
 
   const selectedScene   = scenes.find((s) => s.id === selectedSceneId)
@@ -262,53 +398,75 @@ export function EventEditor() {
     setScope(s)
     setShowForm(false)
     setExpandedEventId(null)
-    setForm({ trigger: defaultTrigger(s), actions: [{ type: 'set_variable', value: '' }] })
+    setForm({ trigger: defaultTrigger(s), actions: [{ type: 'set_variable', value: '' }], branches: [] })
   }
 
   const handleSubmit = () => {
     let newEvent: EventTrigger
+    const ts = Date.now()
     const baseActions = form.actions.map((a, i) => ({
-      id: `action-${Date.now()}-${i}`,
+      id: `action-${ts}-${i}`,
       type: a.type,
       value: a.value,
       ...(a.entryX != null ? { entryX: a.entryX } : {}),
       ...(a.entryY != null ? { entryY: a.entryY } : {}),
       ...(a.entryFacing ? { entryFacing: a.entryFacing } : {}),
     }))
+    const baseBranches: EventBranch[] = form.branches.map((br, bi) => ({
+      id: br.id || `br-${ts}-${bi}`,
+      conditions: br.conditions.map((c, ci): EventCondition => ({
+        id: c.id || `cond-${ts}-${bi}-${ci}`,
+        variable: c.variable,
+        operator: c.operator,
+        value: c.value,
+      })),
+      logic: br.logic,
+      actions: br.actions.map((a, ai) => ({
+        id: `action-${ts}-br${bi}-${ai}`,
+        type: a.type,
+        value: a.value,
+        ...(a.entryX != null ? { entryX: a.entryX } : {}),
+        ...(a.entryY != null ? { entryY: a.entryY } : {}),
+        ...(a.entryFacing ? { entryFacing: a.entryFacing } : {}),
+      })),
+    }))
 
     if (scope === 'scene') {
       if (!selectedObjId) return
       newEvent = {
-        id: `event-${Date.now()}`,
+        id: `event-${ts}`,
         sceneId: selectedSceneId,
         objectId: selectedObjId,
         trigger: form.trigger,
         actions: baseActions,
+        branches: baseBranches,
         enabled: true,
       }
     } else if (scope === 'stage') {
       newEvent = {
-        id: `event-${Date.now()}`,
+        id: `event-${ts}`,
         sceneId: '',
         objectId: '',
         stageId: selectedStageId,
         trigger: 'stage_start',
         actions: baseActions,
+        branches: baseBranches,
         enabled: true,
       }
     } else {
       newEvent = {
-        id: `event-${Date.now()}`,
+        id: `event-${ts}`,
         sceneId: '',
         objectId: '',
         trigger: 'game_start',
         actions: baseActions,
+        branches: baseBranches,
         enabled: true,
       }
     }
     addEvent(newEvent)
     setShowForm(false)
-    setForm({ trigger: defaultTrigger(scope), actions: [{ type: 'set_variable', value: '' }] })
+    setForm({ trigger: defaultTrigger(scope), actions: [{ type: 'set_variable', value: '' }], branches: [] })
   }
 
   const handleDeleteAction = (eventId: string, actionId: string) => {
@@ -469,7 +627,29 @@ export function EventEditor() {
                 </div>
 
                 {isExpanded && (
-                  <div className="border-t border-gray-700 px-4 py-3 space-y-2">
+                  <div className="border-t border-gray-700 px-4 py-3 space-y-3">
+                    {/* Branches summary */}
+                    {(event.branches ?? []).length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-500 font-semibold">Branches</p>
+                        {(event.branches ?? []).map((branch, bi) => (
+                          <div key={branch.id} className="bg-indigo-950 border border-indigo-800 rounded px-3 py-1.5 text-xs text-gray-300">
+                            <span className="text-indigo-400 font-medium">Branch {bi + 1}: </span>
+                            {branch.conditions.map((c, ci) => (
+                              <span key={c.id}>
+                                {ci > 0 && <span className="text-gray-500 mx-1">{branch.logic}</span>}
+                                <span className="font-mono">{c.variable} {OPERATOR_LABELS[c.operator]} {c.value}</span>
+                              </span>
+                            ))}
+                            <span className="text-gray-500 ml-2">→ {branch.actions.length} action{branch.actions.length !== 1 ? 's' : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Default actions */}
+                    <p className="text-xs text-gray-500 font-semibold">
+                      {(event.branches ?? []).length > 0 ? 'Default Actions' : 'Actions'}
+                    </p>
                     {event.actions.map((action: EventAction) => (
                       <div key={action.id} className="flex items-center gap-3 bg-gray-900 rounded px-3 py-2">
                         <span className="text-gray-300 text-sm font-medium flex-1">{ACTION_LABELS[action.type]}</span>
@@ -531,10 +711,18 @@ export function EventEditor() {
               </p>
             )}
 
-            <ActionsEditor
-              form={form} setForm={setForm}
+            <BranchesEditor
+              branches={form.branches}
+              onBranchesChange={(b) => setForm((f) => ({ ...f, branches: b }))}
               scenes={scenes} cinematics={cinematics} miniGames={miniGames}
               allStageVarNames={allStageVarNames}
+            />
+            <ActionsEditor
+              actions={form.actions}
+              onActionsChange={(a) => setForm((f) => ({ ...f, actions: a }))}
+              scenes={scenes} cinematics={cinematics} miniGames={miniGames}
+              allStageVarNames={allStageVarNames}
+              label="Default Actions (when no branch matches)"
             />
 
             <div className="flex gap-3 pt-2">

@@ -2,7 +2,7 @@ import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
   CinematicCompletionAction, NpcMovementInstruction, SceneExitSide,
-  Stage, Goal, GoalCondition,
+  Stage, Goal, GoalCondition, EventCondition,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -213,6 +213,19 @@ export class GameRuntime {
 
   private checkCondition(cond: GoalCondition): boolean {
     const raw = this.state.variables[cond.target]
+    const strVal = raw !== undefined ? String(raw) : ''
+    switch (cond.operator) {
+      case 'equals':       return strVal === cond.value
+      case 'not_equals':   return strVal !== cond.value
+      case 'greater_than': return Number(strVal) > Number(cond.value)
+      case 'less_than':    return Number(strVal) < Number(cond.value)
+      case 'contains':     return strVal.includes(cond.value)
+      default:             return false
+    }
+  }
+
+  private checkEventCondition(cond: EventCondition): boolean {
+    const raw = this.state.variables[cond.variable]
     const strVal = raw !== undefined ? String(raw) : ''
     switch (cond.operator) {
       case 'equals':       return strVal === cond.value
@@ -1542,6 +1555,15 @@ export class GameRuntime {
   // ── Event / action execution ──────────────────────────────────────────────
 
   private executeEvent(event: EventTrigger) {
+    for (const branch of (event.branches ?? [])) {
+      if (branch.conditions.length === 0) continue
+      const results = branch.conditions.map((c) => this.checkEventCondition(c))
+      const matched = branch.logic === 'AND' ? results.every(Boolean) : results.some(Boolean)
+      if (matched) {
+        branch.actions.forEach((a) => this.executeAction(a))
+        return
+      }
+    }
     event.actions.forEach((a) => this.executeAction(a))
   }
 

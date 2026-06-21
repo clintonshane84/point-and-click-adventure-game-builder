@@ -171,6 +171,20 @@ export interface EventAction {
   entryFacing?: FacingDirection  // hero facing in destination scene (navigate_scene only)
 }
 
+export interface EventCondition {
+  id: string
+  variable: string
+  operator: ConditionOperator
+  value: string
+}
+
+export interface EventBranch {
+  id: string
+  conditions: EventCondition[]
+  logic: 'AND' | 'OR'
+  actions: EventAction[]
+}
+
 export interface EventTrigger {
   id: string
   sceneId: string
@@ -178,6 +192,7 @@ export interface EventTrigger {
   stageId?: string     // set for stage_start events; empty for scene-object and game_start events
   trigger: TriggerType
   actions: EventAction[]
+  branches?: EventBranch[]
   enabled: boolean
 }
 
