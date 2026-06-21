@@ -2,7 +2,7 @@ import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
   CinematicCompletionAction, NpcMovementInstruction, SceneExitSide,
-  Stage, Goal, GoalCondition, EventCondition,
+  Stage, Goal, GoalCondition, EventCondition, TriggerType,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -84,6 +84,7 @@ export class GameRuntime {
   private imageCache = new Map<string, HTMLImageElement>()
   private objectVisibility = new Map<string, boolean>()
   private removedObjects = new Set<string>()
+  private activeCollisions = new Set<string>()
   private frameId: number | null = null
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
@@ -129,7 +130,7 @@ export class GameRuntime {
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
     // Fire game_start events before the first scene loads
-    const gameStartEvents = (this.project.events ?? []).filter((e) => e.trigger === 'game_start' && e.enabled)
+    const gameStartEvents = (this.project.events ?? []).filter((e) => this.evTriggers(e).includes('game_start') && e.enabled)
     gameStartEvents.forEach((e) => this.executeEvent(e))
     this.initStageForScene(this.state.currentSceneId)
     if (this.state.showTitleScreen) {
@@ -159,7 +160,7 @@ export class GameRuntime {
     }
     // Fire stage_start events for this stage
     const stageStartEvents = (this.project.events ?? []).filter(
-      (e) => e.trigger === 'stage_start' && e.stageId === stage.id && e.enabled
+      (e) => this.evTriggers(e).includes('stage_start') && e.stageId === stage.id && e.enabled
     )
     stageStartEvents.forEach((e) => this.executeEvent(e))
   }
@@ -282,6 +283,7 @@ export class GameRuntime {
     this.stop()
     this.objectVisibility.clear()
     this.removedObjects.clear()
+    this.activeCollisions.clear()
     this.imageCache.clear()
     this.state = this.freshState()
     this.start()
@@ -430,7 +432,7 @@ export class GameRuntime {
     // Fire scene-level 'enter' events — skip hotspot-bound events (those fire via zone detection)
     const hotspotIds = new Set(scene?.objects.filter((o) => o.type === 'hotspot').map((o) => o.id) ?? [])
     this.project.events
-      .filter((e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled && !hotspotIds.has(e.objectId))
+      .filter((e) => e.sceneId === sceneId && this.evTriggers(e).includes('enter') && e.enabled && !hotspotIds.has(e.objectId))
       .forEach((ev) => this.executeEvent(ev))
   }
 
@@ -447,6 +449,7 @@ export class GameRuntime {
       if (scene) {
         this.updateNpcs(dt, scene)
         this.checkHotspots(scene)
+        this.checkCollisions(scene)
         this.checkScaleZones(scene)
         this.checkSceneEdges(scene)
         this.checkTeleportZones(scene)
@@ -491,15 +494,62 @@ export class GameRuntime {
       if (inside && !wasInside) {
         this.state.activeHotspots.add(obj.id)
         this.project.events
-          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'enter' && e.enabled)
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && this.evTriggers(e).includes('enter') && e.enabled)
           .forEach((ev) => this.executeEvent(ev))
       } else if (!inside && wasInside) {
         this.state.activeHotspots.delete(obj.id)
         this.project.events
-          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'exit' && e.enabled)
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && this.evTriggers(e).includes('exit') && e.enabled)
           .forEach((ev) => this.executeEvent(ev))
       }
     }
+  }
+
+  // ── Multi-trigger helper ──────────────────────────────────────────────────
+
+  private evTriggers(ev: EventTrigger): TriggerType[] {
+    return [ev.trigger, ...(ev.triggers ?? [])]
+  }
+
+  // ── Object visibility helper ──────────────────────────────────────────────
+
+  private isObjectVisible(obj: SceneObject): boolean {
+    if (this.removedObjects.has(obj.id)) return false
+    return this.objectVisibility.has(obj.id) ? this.objectVisibility.get(obj.id)! : obj.visible
+  }
+
+  // ── Collision detection ───────────────────────────────────────────────────
+
+  private checkCollisions(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const scale = char.scale ?? 1
+    const hx = char.x
+    const hy = char.y
+    const hw = mc.width * scale
+    const hh = mc.height * scale
+
+    const sceneIdAtEntry = this.state.currentSceneId
+    const nowColliding = new Set<string>()
+
+    for (const obj of scene.objects) {
+      if (this.state.currentSceneId !== sceneIdAtEntry) break
+      if (!this.isObjectVisible(obj)) continue
+      const overlaps =
+        hx < obj.x + obj.width && hx + hw > obj.x &&
+        hy < obj.y + obj.height && hy + hh > obj.y
+      if (!overlaps) continue
+      nowColliding.add(obj.id)
+      if (!this.activeCollisions.has(obj.id)) {
+        this.project.events
+          .filter((ev) => ev.sceneId === scene.id && ev.objectId === obj.id && this.evTriggers(ev).includes('collision') && ev.enabled)
+          .forEach((ev) => this.executeEvent(ev))
+      }
+    }
+    this.activeCollisions.forEach((id) => { if (!nowColliding.has(id)) this.activeCollisions.delete(id) })
+    nowColliding.forEach((id) => this.activeCollisions.add(id))
   }
 
   // ── Scale zone detection ──────────────────────────────────────────────────
@@ -1496,7 +1546,7 @@ export class GameRuntime {
     const obj = this.getObjectAt(scene, pos.x, pos.y)
     if (obj) {
       const events = this.project.events.filter(
-        (ev) => ev.sceneId === scene.id && ev.objectId === obj.id && ev.trigger === 'click' && ev.enabled
+        (ev) => ev.sceneId === scene.id && ev.objectId === obj.id && this.evTriggers(ev).includes('click') && ev.enabled
       )
       events.forEach((ev) => this.executeEvent(ev))
       return

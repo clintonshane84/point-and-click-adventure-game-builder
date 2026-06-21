@@ -6,11 +6,12 @@ import type { EventTrigger, EventAction, EventCondition, EventBranch, TriggerTyp
 type EventScope = 'scene' | 'stage' | 'global'
 
 const SCENE_TRIGGER_LABELS: Partial<Record<TriggerType, string>> = {
-  click: 'Click',
-  hover: 'Hover',
-  enter: 'Enter',
-  exit: 'Exit',
-  keypress: 'Key Press',
+  click:     'Click',
+  hover:     'Hover',
+  enter:     'Enter',
+  exit:      'Exit',
+  keypress:  'Key Press',
+  collision: 'Collision',
 }
 
 const TRIGGER_COLORS: Record<TriggerType, string> = {
@@ -21,6 +22,7 @@ const TRIGGER_COLORS: Record<TriggerType, string> = {
   keypress:    'bg-purple-600',
   stage_start: 'bg-indigo-600',
   game_start:  'bg-teal-600',
+  collision:   'bg-orange-600',
 }
 
 const TRIGGER_LABELS: Record<TriggerType, string> = {
@@ -31,6 +33,7 @@ const TRIGGER_LABELS: Record<TriggerType, string> = {
   keypress:    'Key Press',
   stage_start: 'Stage Start',
   game_start:  'Game Start',
+  collision:   'Collision',
 }
 
 const ACTION_LABELS: Record<ActionType, string> = {
@@ -54,7 +57,7 @@ type FormCondition = Omit<EventCondition, never>
 type FormBranch = { id: string; conditions: FormCondition[]; logic: 'AND' | 'OR'; actions: FormAction[] }
 
 interface EventFormState {
-  trigger: TriggerType
+  triggers: TriggerType[]
   actions: FormAction[]
   branches: FormBranch[]
 }
@@ -219,12 +222,14 @@ function ActionValueEditor({
         <option value="">— select event to trigger —</option>
         {events.map((ev) => {
           const obj = ev.objectId ? allObjects.find((o) => o.id === ev.objectId) : null
+          const allTriggers = [ev.trigger, ...(ev.triggers ?? [])]
+          const triggerLabel = allTriggers.map((t) => TRIGGER_LABELS[t]).join('/')
           const label = obj
-            ? `${TRIGGER_LABELS[ev.trigger]} on "${obj.name}"`
+            ? `${triggerLabel} on "${obj.name}"`
             : ev.trigger === 'game_start'
             ? 'Game Start'
             : ev.trigger === 'stage_start'
-            ? `Stage Start`
+            ? 'Stage Start'
             : ev.id
           return <option key={ev.id} value={ev.id}>{label}</option>
         })}
@@ -442,7 +447,7 @@ export function EventEditor() {
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null)
   const [showForm, setShowForm]         = useState(false)
   const [form, setForm]                 = useState<EventFormState>({
-    trigger: 'click',
+    triggers: ['click'],
     actions: [{ type: 'set_variable', value: '' }],
     branches: [],
   })
@@ -465,7 +470,7 @@ export function EventEditor() {
     setScope(s)
     setShowForm(false)
     setExpandedEventId(null)
-    setForm({ trigger: defaultTrigger(s), actions: [{ type: 'set_variable', value: '' }], branches: [] })
+    setForm({ triggers: [defaultTrigger(s)], actions: [{ type: 'set_variable', value: '' }], branches: [] })
   }
 
   const handleSubmit = () => {
@@ -496,12 +501,15 @@ export function EventEditor() {
     }))
 
     if (scope === 'scene') {
-      if (!selectedObjId) return
+      if (!selectedObjId || form.triggers.length === 0) return
+      const primaryTrigger = form.triggers[0]
+      const extraTriggers = form.triggers.slice(1)
       newEvent = {
         id: `event-${ts}`,
         sceneId: selectedSceneId,
         objectId: selectedObjId,
-        trigger: form.trigger,
+        trigger: primaryTrigger,
+        ...(extraTriggers.length > 0 ? { triggers: extraTriggers } : {}),
         actions: baseActions,
         branches: baseBranches,
         enabled: true,
@@ -530,7 +538,7 @@ export function EventEditor() {
     }
     addEvent(newEvent)
     setShowForm(false)
-    setForm({ trigger: defaultTrigger(scope), actions: [{ type: 'set_variable', value: '' }], branches: [] })
+    setForm({ triggers: [defaultTrigger(scope)], actions: [{ type: 'set_variable', value: '' }], branches: [] })
   }
 
   const handleDeleteAction = (eventId: string, actionId: string) => {
@@ -542,7 +550,7 @@ export function EventEditor() {
   const canAddEvent =
     scope === 'global' ||
     (scope === 'stage'  && !!selectedStageId) ||
-    (scope === 'scene'  && !!selectedObjId)
+    (scope === 'scene'  && !!selectedObjId && form.triggers.length > 0)
 
   return (
     <div className="flex h-full bg-gray-900">
@@ -673,9 +681,13 @@ export function EventEditor() {
             return (
               <div key={event.id} className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
                 <div className="flex items-center gap-3 px-4 py-3">
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${TRIGGER_COLORS[event.trigger]}`}>
-                    {TRIGGER_LABELS[event.trigger]}
-                  </span>
+                  <div className="flex gap-1 flex-shrink-0">
+                    {[event.trigger, ...(event.triggers ?? [])].map((t) => (
+                      <span key={t} className={`text-xs font-semibold px-2 py-0.5 rounded-full text-white ${TRIGGER_COLORS[t]}`}>
+                        {TRIGGER_LABELS[t]}
+                      </span>
+                    ))}
+                  </div>
                   <span className="text-gray-300 text-sm flex-1">
                     on <span className="font-medium text-gray-100">{label}</span>
                   </span>
@@ -752,14 +764,28 @@ export function EventEditor() {
 
             {scope === 'scene' && (
               <div>
-                <label className="text-xs text-gray-400 block mb-1">Trigger</label>
-                <select value={form.trigger}
-                  onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value as TriggerType }))}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+                <label className="text-xs text-gray-400 block mb-1.5">Triggers (event fires when any selected trigger activates)</label>
+                <div className="flex flex-wrap gap-2">
                   {(Object.keys(SCENE_TRIGGER_LABELS) as TriggerType[]).map((t) => (
-                    <option key={t} value={t}>{SCENE_TRIGGER_LABELS[t]}</option>
+                    <label key={t} className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.triggers.includes(t)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...form.triggers, t]
+                            : form.triggers.filter((x) => x !== t)
+                          setForm((f) => ({ ...f, triggers: next }))
+                        }}
+                        className="accent-indigo-500"
+                      />
+                      <span className={`px-2 py-0.5 rounded-full text-white ${TRIGGER_COLORS[t]}`}>{SCENE_TRIGGER_LABELS[t]}</span>
+                    </label>
                   ))}
-                </select>
+                </div>
+                {form.triggers.length === 0 && (
+                  <p className="text-xs text-red-400 mt-1">Select at least one trigger.</p>
+                )}
               </div>
             )}
 

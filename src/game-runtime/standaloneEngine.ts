@@ -98,6 +98,7 @@ export class GameEngine {
     this.imageCache = new Map();
     this.objectVisibility = new Map();
     this.removedObjects = new Set();
+    this.activeCollisions = new Set();
     this.frameId = null;
     this.lastFrameTime = 0;
     this.titleScreenButtonRects = [];
@@ -133,7 +134,7 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
-    const gameStartEvs=(this.project.events||[]).filter(e=>e.trigger==='game_start'&&e.enabled);
+    const gameStartEvs=(this.project.events||[]).filter(e=>this._evTriggers(e).includes('game_start')&&e.enabled);
     gameStartEvs.forEach(e=>this._execEvent(e));
     this._initStageForScene(this.state.currentSceneId);
     if(this.state.showTitleScreen){
@@ -153,7 +154,7 @@ export class GameEngine {
       const val=v.type==='number'?(Number(v.defaultValue)||0):v.type==='boolean'?(v.defaultValue==='true'):v.defaultValue;
       this.state.variables[v.name]=val;
     }
-    const stageStartEvs=(this.project.events||[]).filter(e=>e.trigger==='stage_start'&&e.stageId===stage.id&&e.enabled);
+    const stageStartEvs=(this.project.events||[]).filter(e=>this._evTriggers(e).includes('stage_start')&&e.stageId===stage.id&&e.enabled);
     stageStartEvs.forEach(e=>this._execEvent(e));
   }
 
@@ -229,6 +230,7 @@ export class GameEngine {
     this.stop();
     this.objectVisibility.clear();
     this.removedObjects.clear();
+    this.activeCollisions.clear();
     this.imageCache.clear();
     this.state = this._freshState();
     this.start();
@@ -298,7 +300,7 @@ export class GameEngine {
     }
     const hotspotIds=new Set(scene?.objects.filter(o=>o.type==='hotspot').map(o=>o.id)??[]);
     this.project.events
-      .filter(e=>e.sceneId===sceneId&&e.trigger==='enter'&&e.enabled&&!hotspotIds.has(e.objectId))
+      .filter(e=>e.sceneId===sceneId&&this._evTriggers(e).includes('enter')&&e.enabled&&!hotspotIds.has(e.objectId))
       .forEach(ev=>this._execEvent(ev));
   }
 
@@ -310,11 +312,36 @@ export class GameEngine {
     if(!this.state.showTitleScreen){
       this._updateCharacter(dt);
       const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-      if(scene){this._checkHotspots(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
+      if(scene){this._checkHotspots(scene);this._checkCollisions(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
       if(this.state.cinematic) this._updateCinematic(dt);
     }
     this._render();
     this.frameId = requestAnimationFrame(() => this._loop());
+  }
+
+  _evTriggers(ev){return [ev.trigger,...(ev.triggers||[])];}
+
+  _checkCollisions(scene){
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    const scale=char.scale??1;
+    const hx=char.x,hy=char.y,hw=mc.width*scale,hh=mc.height*scale;
+    const sceneIdAtEntry=this.state.currentSceneId;
+    const nowColliding=new Set();
+    for(const obj of scene.objects){
+      if(this.state.currentSceneId!==sceneIdAtEntry) break;
+      const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
+      if(!vis||this.removedObjects.has(obj.id)) continue;
+      const overlaps=hx<obj.x+obj.width&&hx+hw>obj.x&&hy<obj.y+obj.height&&hy+hh>obj.y;
+      if(!overlaps) continue;
+      nowColliding.add(obj.id);
+      if(!this.activeCollisions.has(obj.id)){
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&this._evTriggers(e).includes('collision')&&e.enabled)
+          .forEach(ev=>this._execEvent(ev));
+      }
+    }
+    this.activeCollisions.forEach(id=>{if(!nowColliding.has(id))this.activeCollisions.delete(id);});
+    nowColliding.forEach(id=>this.activeCollisions.add(id));
   }
 
   _checkHotspots(scene) {
@@ -331,11 +358,11 @@ export class GameEngine {
       const wasInside=this.state.activeHotspots.has(obj.id);
       if(inside&&!wasInside){
         this.state.activeHotspots.add(obj.id);
-        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&e.trigger==='enter'&&e.enabled)
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&this._evTriggers(e).includes('enter')&&e.enabled)
           .forEach(ev=>this._execEvent(ev));
       } else if(!inside&&wasInside){
         this.state.activeHotspots.delete(obj.id);
-        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&e.trigger==='exit'&&e.enabled)
+        this.project.events.filter(e=>e.sceneId===scene.id&&e.objectId===obj.id&&this._evTriggers(e).includes('exit')&&e.enabled)
           .forEach(ev=>this._execEvent(ev));
       }
     }
@@ -743,7 +770,7 @@ export class GameEngine {
     const obj=this._objAt(scene,pos.x,pos.y);
     if (obj) {
       this.project.events
-        .filter(ev=>ev.sceneId===scene.id&&ev.objectId===obj.id&&ev.trigger==='click'&&ev.enabled)
+        .filter(ev=>ev.sceneId===scene.id&&ev.objectId===obj.id&&this._evTriggers(ev).includes('click')&&ev.enabled)
         .forEach(ev=>this._execEvent(ev));
       return;
     }
