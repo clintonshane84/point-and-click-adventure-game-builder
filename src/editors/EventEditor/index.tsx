@@ -46,6 +46,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   stop_animation: 'Stop Animation',
   play_cinematic: 'Play Cinematic',
   launch_minigame:'Launch Mini-Game',
+  trigger_event:  'Trigger Event',
 }
 
 type FormAction = Pick<EventAction, 'type' | 'value' | 'entryX' | 'entryY' | 'entryFacing' | 'spawnSceneId' | 'spawnX' | 'spawnY'>
@@ -60,7 +61,7 @@ interface EventFormState {
 
 // ── Shared action value editor (used both in form and inline editing) ─────────
 function ActionValueEditor({
-  action, idx, actions, onActionsChange, scenes, cinematics, miniGames, allStageVarNames,
+  action, idx, actions, onActionsChange, scenes, cinematics, miniGames, allStageVarNames, events,
 }: {
   action: FormAction
   idx: number
@@ -70,6 +71,7 @@ function ActionValueEditor({
   cinematics: Cinematic[]
   miniGames: MiniGame[]
   allStageVarNames: string[]
+  events: EventTrigger[]
 }) {
   const update = (patch: Partial<FormAction>) => {
     const updated = [...actions]
@@ -209,6 +211,26 @@ function ActionValueEditor({
       </div>
     )
   }
+  if (action.type === 'trigger_event') {
+    const allObjects = scenes.flatMap((s) => s.objects)
+    return (
+      <select value={action.value} onChange={(e) => update({ value: e.target.value })}
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+        <option value="">— select event to trigger —</option>
+        {events.map((ev) => {
+          const obj = ev.objectId ? allObjects.find((o) => o.id === ev.objectId) : null
+          const label = obj
+            ? `${TRIGGER_LABELS[ev.trigger]} on "${obj.name}"`
+            : ev.trigger === 'game_start'
+            ? 'Game Start'
+            : ev.trigger === 'stage_start'
+            ? `Stage Start`
+            : ev.id
+          return <option key={ev.id} value={ev.id}>{label}</option>
+        })}
+      </select>
+    )
+  }
   return (
     <input type="text" placeholder="Value" value={action.value}
       onChange={(e) => update({ value: e.target.value })}
@@ -218,7 +240,7 @@ function ActionValueEditor({
 
 // ── Actions editor panel ──────────────────────────────────────────────────────
 function ActionsEditor({
-  actions, onActionsChange, scenes, cinematics, miniGames, allStageVarNames, label,
+  actions, onActionsChange, scenes, cinematics, miniGames, allStageVarNames, events, label,
 }: {
   actions: FormAction[]
   onActionsChange: (actions: FormAction[]) => void
@@ -226,6 +248,7 @@ function ActionsEditor({
   cinematics: Cinematic[]
   miniGames: MiniGame[]
   allStageVarNames: string[]
+  events: EventTrigger[]
   label?: string
 }) {
   return (
@@ -256,7 +279,7 @@ function ActionsEditor({
             <ActionValueEditor
               action={action} idx={idx} actions={actions} onActionsChange={onActionsChange}
               scenes={scenes} cinematics={cinematics} miniGames={miniGames}
-              allStageVarNames={allStageVarNames}
+              allStageVarNames={allStageVarNames} events={events}
             />
           </div>
           <button
@@ -281,7 +304,7 @@ const OPERATOR_LABELS: Record<ConditionOperator, string> = {
 }
 
 function BranchesEditor({
-  branches, onBranchesChange, scenes, cinematics, miniGames, allStageVarNames,
+  branches, onBranchesChange, scenes, cinematics, miniGames, allStageVarNames, events,
 }: {
   branches: FormBranch[]
   onBranchesChange: (branches: FormBranch[]) => void
@@ -289,6 +312,7 @@ function BranchesEditor({
   cinematics: Cinematic[]
   miniGames: MiniGame[]
   allStageVarNames: string[]
+  events: EventTrigger[]
 }) {
   const addBranch = () => {
     const id = `br-${Date.now()}`
@@ -391,7 +415,7 @@ function BranchesEditor({
               actions={branch.actions}
               onActionsChange={(a) => updateBranch(bi, { actions: a })}
               scenes={scenes} cinematics={cinematics} miniGames={miniGames}
-              allStageVarNames={allStageVarNames}
+              allStageVarNames={allStageVarNames} events={events}
             />
           </div>
         </div>
@@ -755,13 +779,13 @@ export function EventEditor() {
               branches={form.branches}
               onBranchesChange={(b) => setForm((f) => ({ ...f, branches: b }))}
               scenes={scenes} cinematics={cinematics} miniGames={miniGames}
-              allStageVarNames={allStageVarNames}
+              allStageVarNames={allStageVarNames} events={events}
             />
             <ActionsEditor
               actions={form.actions}
               onActionsChange={(a) => setForm((f) => ({ ...f, actions: a }))}
               scenes={scenes} cinematics={cinematics} miniGames={miniGames}
-              allStageVarNames={allStageVarNames}
+              allStageVarNames={allStageVarNames} events={events}
               label="Default Actions (when no branch matches)"
             />
 

@@ -162,6 +162,7 @@ export type ActionType =
   | 'stop_animation'
   | 'play_cinematic'
   | 'launch_minigame'
+  | 'trigger_event'
 
 export interface EventAction {
   id: string

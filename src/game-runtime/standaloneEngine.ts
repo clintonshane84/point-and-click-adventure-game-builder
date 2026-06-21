@@ -838,6 +838,11 @@ export class GameEngine {
       }
       case 'play_cinematic': this._playCinematic(action.value); break;
       case 'launch_minigame': this._launchMiniGame(action.value); break;
+      case 'trigger_event':{
+        const ev=(this.project.events||[]).find(e=>e.id===action.value);
+        if(ev) this._execEvent(ev);
+        break;
+      }
     }
   }
 
