@@ -1064,6 +1064,17 @@ export class GameEngine {
     const mg=(this.project.miniGames||[]).find(m=>m.id===id);
     if(!mg?.source) return;
     const returnSceneId=this.state.currentSceneId;
+    const snapshot={
+      variables:{...this.state.variables},
+      currentStageId:this.state.currentStageId,
+      character:this.state.character?{...this.state.character,waypoints:[...this.state.character.waypoints]}:null,
+      npcStates:new Map(Array.from(this.state.npcStates.entries()).map(([k,v])=>[k,{...v,waypoints:[...v.waypoints]}])),
+      objectVisibility:new Map(this.objectVisibility),
+      removedObjects:new Set(this.removedObjects),
+      activeHotspots:new Set(this.state.activeHotspots),
+      activeTeleportZones:new Set(this.state.activeTeleportZones),
+      visitedScenes:[...this.state.visitedScenes],
+    };
     this.state.miniGame={returnSceneId,instance:null};
     if(this.frameId!==null){cancelAnimationFrame(this.frameId);this.frameId=null;}
     try{
@@ -1079,9 +1090,20 @@ export class GameEngine {
         this.state.miniGame?.instance?.destroy();
         this.state.miniGame=null;
         document.body.removeChild(overlay);
+        this.state.currentSceneId=returnSceneId;
+        this.state.currentStageId=snapshot.currentStageId;
+        this.state.variables={...snapshot.variables};
+        this.state.character=snapshot.character?{...snapshot.character,waypoints:[...snapshot.character.waypoints]}:null;
+        this.state.npcStates=new Map(Array.from(snapshot.npcStates.entries()).map(([k,v])=>[k,{...v,waypoints:[...v.waypoints]}]));
+        this.objectVisibility=new Map(snapshot.objectVisibility);
+        this.removedObjects=new Set(snapshot.removedObjects);
+        this.state.activeHotspots=new Set(snapshot.activeHotspots);
+        this.state.activeTeleportZones=new Set(snapshot.activeTeleportZones);
+        this.state.visitedScenes=[...snapshot.visitedScenes];
+        this.state.dialogText=null;
+        this.state.dialogCallback=null;
         if(vars) Object.assign(this.state.variables,vars);
         this.state.variables['minigame_result']=result;
-        this._loadScene(returnSceneId,undefined,false);
         this.state.running=true;
         this.lastFrameTime=0;
         this._loop();
