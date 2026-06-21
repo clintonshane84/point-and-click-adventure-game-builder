@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, Zap, ChevronDown, ChevronUp, Globe, BookOpen } from 'lucide-react'
+import { Plus, Trash2, Zap, ChevronDown, ChevronUp, Globe, BookOpen, Pencil } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
 import type { EventTrigger, EventAction, EventCondition, EventBranch, TriggerType, ActionType, ConditionOperator, FacingDirection, Scene, Cinematic, MiniGame } from '../../types'
 
@@ -72,6 +72,36 @@ interface EventFormState {
   triggers: TriggerType[]
   actions: FormAction[]
   branches: FormBranch[]
+}
+
+// ── Deserialize stored event back into form state (inverse of serializeAction) ─
+function deserializeAction(a: EventAction): FormAction {
+  return {
+    type: a.type,
+    value: a.value,
+    ...(a.entryX    != null ? { entryX: a.entryX }           : {}),
+    ...(a.entryY    != null ? { entryY: a.entryY }           : {}),
+    ...(a.entryFacing       ? { entryFacing: a.entryFacing } : {}),
+    ...(a.spawnSceneId      ? { spawnSceneId: a.spawnSceneId }: {}),
+    ...(a.spawnX    != null ? { spawnX: a.spawnX }           : {}),
+    ...(a.spawnY    != null ? { spawnY: a.spawnY }           : {}),
+    ...(a.onWinActions?.length  ? { onWinActions:  a.onWinActions.map(deserializeAction)  } : {}),
+    ...(a.onLoseActions?.length ? { onLoseActions: a.onLoseActions.map(deserializeAction) } : {}),
+    ...(a.onExitActions?.length ? { onExitActions: a.onExitActions.map(deserializeAction) } : {}),
+  }
+}
+
+function deserializeEvent(event: EventTrigger): EventFormState {
+  return {
+    triggers: [event.trigger, ...(event.triggers ?? [])],
+    actions:  event.actions.map(deserializeAction),
+    branches: (event.branches ?? []).map((br) => ({
+      id:         br.id,
+      conditions: br.conditions.map((c) => ({ ...c })),
+      logic:      br.logic,
+      actions:    br.actions.map(deserializeAction),
+    })),
+  }
 }
 
 // ── Shared action value editor (used both in form and inline editing) ─────────
@@ -476,6 +506,7 @@ export function EventEditor() {
   const [selectedStageId, setSelectedStageId] = useState(stages[0]?.id ?? '')
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null)
   const [showForm, setShowForm]         = useState(false)
+  const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const [form, setForm]                 = useState<EventFormState>({
     triggers: ['click'],
     actions: [{ type: 'set_variable', value: '' }],
@@ -499,6 +530,7 @@ export function EventEditor() {
   const handleScopeChange = (s: EventScope) => {
     setScope(s)
     setShowForm(false)
+    setEditingEventId(null)
     setExpandedEventId(null)
     setForm({ triggers: [defaultTrigger(s)], actions: [{ type: 'set_variable', value: '' }], branches: [] })
   }
@@ -569,7 +601,17 @@ export function EventEditor() {
         enabled: true,
       }
     }
-    addEvent(newEvent)
+    if (editingEventId) {
+      updateEvent(editingEventId, {
+        trigger:  newEvent.trigger,
+        triggers: newEvent.triggers,
+        actions:  newEvent.actions,
+        branches: newEvent.branches,
+      })
+      setEditingEventId(null)
+    } else {
+      addEvent(newEvent)
+    }
     setShowForm(false)
     setForm({ triggers: [defaultTrigger(scope)], actions: [{ type: 'set_variable', value: '' }], branches: [] })
   }
@@ -730,6 +772,17 @@ export function EventEditor() {
                   <button onClick={() => setExpandedEventId(isExpanded ? null : event.id)} className="text-gray-400 hover:text-gray-200">
                     {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </button>
+                  <button
+                    onClick={() => {
+                      setForm(deserializeEvent(event))
+                      setEditingEventId(event.id)
+                      setShowForm(true)
+                    }}
+                    className="text-gray-500 hover:text-indigo-400"
+                    title="Edit event"
+                  >
+                    <Pencil size={14} />
+                  </button>
                   <button onClick={() => deleteEvent(event.id)} className="text-gray-500 hover:text-red-400">
                     <Trash2 size={14} />
                   </button>
@@ -787,12 +840,12 @@ export function EventEditor() {
         </div>
       </div>
 
-      {/* Add Event modal */}
+      {/* Add / Edit Event modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
           <div className="bg-gray-800 border border-gray-600 rounded-xl w-[480px] max-h-[80vh] overflow-y-auto p-6 space-y-4">
             <h3 className="text-gray-100 font-semibold text-lg">
-              Add {scope === 'stage' ? 'Stage' : scope === 'global' ? 'Global' : 'Scene'} Event
+              {editingEventId ? 'Edit' : 'Add'} {scope === 'stage' ? 'Stage' : scope === 'global' ? 'Global' : 'Scene'} Event
             </h3>
 
             {scope === 'scene' && (
@@ -849,13 +902,13 @@ export function EventEditor() {
             />
 
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setShowForm(false)}
+              <button onClick={() => { setShowForm(false); setEditingEventId(null) }}
                 className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-sm">
                 Cancel
               </button>
               <button onClick={handleSubmit} disabled={!canAddEvent}
                 className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded text-sm font-medium">
-                Add Event
+                {editingEventId ? 'Save Changes' : 'Add Event'}
               </button>
             </div>
           </div>
