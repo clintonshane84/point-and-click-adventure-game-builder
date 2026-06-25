@@ -740,14 +740,18 @@ export class GameEngine {
     const fs=Math.max(12,Math.min(16,canvas.width/50));
     ctx.font=fs+'px sans-serif'; ctx.fillStyle='#e2e8f0';
     ctx.textAlign='left'; ctx.textBaseline='top';
-    const mw=canvas.width-16-pad*2, words=this.state.dialogText.split(' ');
-    let line='',ly=by+pad,lh=fs+6;
-    words.forEach(w=>{
-      const t=line+w+' ';
-      if(ctx.measureText(t).width>mw&&line){ctx.fillText(line.trim(),8+pad,ly);line=w+' ';ly+=lh;}
-      else line=t;
+    const mw=canvas.width-16-pad*2, lh=fs+6;
+    let ly=by+pad;
+    const paragraphs=(this.state.dialogText||'').split('\\n');
+    paragraphs.forEach(para=>{
+      const words=para.split(' '); let line='';
+      words.forEach(w=>{
+        const t=line+w+' ';
+        if(ctx.measureText(t).width>mw&&line){ctx.fillText(line.trim(),8+pad,ly);line=w+' ';ly+=lh;}
+        else line=t;
+      });
+      if(line.trim()){ctx.fillText(line.trim(),8+pad,ly);ly+=lh;}
     });
-    if(line.trim()) ctx.fillText(line.trim(),8+pad,ly);
     ctx.fillStyle='#6366f1'; ctx.font='12px sans-serif'; ctx.textAlign='right'; ctx.textBaseline='bottom';
     ctx.fillText('\\u25b6 Click to continue',canvas.width-16,by+bh-8);
   }
@@ -975,7 +979,7 @@ export class GameEngine {
         if(!quest) break;
         if(this.state.activeQuestIds.includes(quest.id)||this.state.completedQuestIds.includes(quest.id)) break;
         this.state.activeQuestIds=[...this.state.activeQuestIds,quest.id];
-        this.state.dialogText='New Quest: '+quest.name+'\n'+quest.description;
+        this.state.dialogText='New Quest: '+quest.name+'\\n'+quest.description;
         break;
       }
       case 'complete_quest':{

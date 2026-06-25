@@ -1495,22 +1495,25 @@ export class GameRuntime {
     ctx.textBaseline = 'top'
 
     const maxWidth = canvas.width - 16 - padding * 2
-    const words = (this.state.dialogText ?? '').split(' ')
-    let line = ''
-    let lineY = boxY + padding
     const lineHeight = fontSize + 6
+    let lineY = boxY + padding
 
-    for (const word of words) {
-      const test = line + word + ' '
-      if (ctx.measureText(test).width > maxWidth && line) {
-        ctx.fillText(line.trim(), 8 + padding, lineY)
-        line = word + ' '
-        lineY += lineHeight
-      } else {
-        line = test
+    const paragraphs = (this.state.dialogText ?? '').split('\n')
+    for (const para of paragraphs) {
+      const words = para.split(' ')
+      let line = ''
+      for (const word of words) {
+        const test = line + word + ' '
+        if (ctx.measureText(test).width > maxWidth && line) {
+          ctx.fillText(line.trim(), 8 + padding, lineY)
+          line = word + ' '
+          lineY += lineHeight
+        } else {
+          line = test
+        }
       }
+      if (line.trim()) { ctx.fillText(line.trim(), 8 + padding, lineY); lineY += lineHeight }
     }
-    if (line.trim()) ctx.fillText(line.trim(), 8 + padding, lineY)
 
     ctx.fillStyle = '#6366f1'
     ctx.font = `12px sans-serif`
