@@ -551,9 +551,12 @@ export class GameRuntime {
     for (const obj of scene.objects) {
       if (this.state.currentSceneId !== sceneIdAtEntry) break
       if (!this.isObjectVisible(obj)) continue
+      const ns = this.state.npcStates.get(obj.id)
+      const ox = ns ? ns.x : obj.x
+      const oy = ns ? ns.y : obj.y
       const overlaps =
-        hx < obj.x + obj.width && hx + hw > obj.x &&
-        hy < obj.y + obj.height && hy + hh > obj.y
+        hx < ox + obj.width && hx + hw > ox &&
+        hy < oy + obj.height && hy + hh > oy
       if (!overlaps) continue
       nowColliding.add(obj.id)
       if (!this.activeCollisions.has(obj.id)) {

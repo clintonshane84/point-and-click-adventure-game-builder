@@ -342,7 +342,9 @@ export class GameEngine {
       if(this.state.currentSceneId!==sceneIdAtEntry) break;
       const vis=this.objectVisibility.has(obj.id)?this.objectVisibility.get(obj.id):obj.visible;
       if(!vis||this.removedObjects.has(obj.id)) continue;
-      const overlaps=hx<obj.x+obj.width&&hx+hw>obj.x&&hy<obj.y+obj.height&&hy+hh>obj.y;
+      const ns=this.state.npcStates.get(obj.id);
+      const ox=ns?ns.x:obj.x,oy=ns?ns.y:obj.y;
+      const overlaps=hx<ox+obj.width&&hx+hw>ox&&hy<oy+obj.height&&hy+hh>oy;
       if(!overlaps) continue;
       nowColliding.add(obj.id);
       if(!this.activeCollisions.has(obj.id)){
