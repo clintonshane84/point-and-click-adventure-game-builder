@@ -66,6 +66,7 @@ const ChaseRescue = {
     let grounded   = true
     let animFrame  = 0          // 0 or 1 — running leg toggle
     let gap        = INITIAL_GAP
+    let davidXPos  = DAVID_X       // dynamic X: moves right toward lion as gap closes
     let denProgress = 0         // 0 → 1
     let elapsed    = 0          // seconds since RUNNING started
     let stumbling  = false      // brief penalty window after hit
@@ -93,7 +94,6 @@ const ChaseRescue = {
     // ── Obstacle type definitions ─────────────────────────────────────────────
     const OBS_DEFS = [
       { type: 'rock',   w: 38, h: 30 },
-      { type: 'tree',   w: 24, h: 74 },
       { type: 'stream', w: 72, h: 10 },
     ]
 
@@ -208,13 +208,16 @@ const ChaseRescue = {
           davidY    = GROUND_Y
           davidVelY = 0
           grounded  = true
-          spawnDust(this, DAVID_X, GROUND_Y)
+          spawnDust(this, davidXPos, GROUND_Y)
         }
       }
 
       // Gap closes naturally (stumbling halves the rate)
       const closeRate = stumbling ? GAP_CLOSE * 0.4 : GAP_CLOSE
       gap = Math.max(0, gap - closeRate * dt)
+
+      // David moves closer to lion as gap shrinks (reaches lion when gap hits 0)
+      davidXPos = DAVID_X + (PRED_X - DAVID_X) * Math.max(0, Math.min(1, 1 - gap / INITIAL_GAP))
 
       // Stumble timer
       if (stumbling) {
@@ -248,7 +251,7 @@ const ChaseRescue = {
 
         // Collision
         if (!obs.hit) {
-          const inX = DAVID_X + 10 > obs.x && DAVID_X - 10 < obs.x + obs.w
+          const inX = davidXPos + 10 > obs.x && davidXPos - 10 < obs.x + obs.w
           let hit = false
           if (obs.type === 'stream') {
             hit = inX && grounded
@@ -325,7 +328,7 @@ const ChaseRescue = {
       stumbleTimer = 0.60
 
       // Red flash on David
-      const flash = scene.add.rectangle(DAVID_X, davidY - 28, 28, 58, 0xff2222, 0.55)
+      const flash = scene.add.rectangle(davidXPos, davidY - 28, 28, 58, 0xff2222, 0.55)
         .setDepth(6)
       scene.tweens.add({
         targets: flash,
@@ -339,7 +342,7 @@ const ChaseRescue = {
       scene.cameras.main.shake(200, 0.008)
 
       // Stumble text
-      const tx = scene.add.text(DAVID_X, davidY - 70, 'STUMBLE!', {
+      const tx = scene.add.text(davidXPos, davidY - 70, 'STUMBLE!', {
         fontSize: '13px', color: '#ff4444', fontStyle: 'bold',
         stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5, 1).setDepth(8)
@@ -360,6 +363,7 @@ const ChaseRescue = {
       if (davidRunSprite || davidJumpSprite) {
         const airborne = !grounded
         if (davidRunSprite) {
+          davidRunSprite.x = davidXPos
           davidRunSprite.y = davidY
           davidRunSprite.setVisible(!airborne)
           if (!(davidRunSprite instanceof Phaser.GameObjects.Sprite)) {
@@ -367,6 +371,7 @@ const ChaseRescue = {
           }
         }
         if (davidJumpSprite) {
+          davidJumpSprite.x = davidXPos
           davidJumpSprite.y = davidY
           davidJumpSprite.setVisible(airborne)
           if (!(davidJumpSprite instanceof Phaser.GameObjects.Sprite)) {
@@ -379,7 +384,7 @@ const ChaseRescue = {
         return
       }
 
-      const x = DAVID_X
+      const x = davidXPos
       const y = davidY
       const f = animFrame  // 0 or 1
       const air = !grounded
@@ -723,7 +728,7 @@ const ChaseRescue = {
         if (grounded) {
           davidVelY = JUMP_VEL
           grounded  = false
-          spawnDust(scene, DAVID_X, GROUND_Y)
+          spawnDust(scene, davidXPos, GROUND_Y)
         }
       }
 
