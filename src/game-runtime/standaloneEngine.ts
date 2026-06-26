@@ -130,6 +130,8 @@ export class GameEngine {
     this._boundClick = this._handleClick.bind(this);
     this._boundMove = this._handleMouseMove.bind(this);
     this._boundKeyDown = this._handleKeyDown.bind(this);
+    this._boundKeyUp = this._handleKeyUp.bind(this);
+    this.activeKeys = new Set();
   }
 
   _freshState() {
@@ -163,6 +165,7 @@ export class GameEngine {
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
     window.addEventListener('keydown', this._boundKeyDown);
+    window.addEventListener('keyup', this._boundKeyUp);
     const gameStartEvs=(this.project.events||[]).filter(e=>this._evTriggers(e).includes('game_start')&&e.enabled);
     gameStartEvs.forEach(e=>this._execEvent(e));
     this._initStageForScene(this.state.currentSceneId);
@@ -253,6 +256,7 @@ export class GameEngine {
     this.canvas.removeEventListener('click', this._boundClick);
     this.canvas.removeEventListener('mousemove', this._boundMove);
     window.removeEventListener('keydown', this._boundKeyDown);
+    window.removeEventListener('keyup', this._boundKeyUp);
     if (this.frameId !== null) { cancelAnimationFrame(this.frameId); this.frameId = null; }
   }
 
@@ -343,7 +347,7 @@ export class GameEngine {
     if(!this.state.showTitleScreen){
       this._updateCharacter(dt);
       const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
-      if(scene){this._checkHotspots(scene);this._checkCollisions(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
+      if(scene){this._updateArrowMovement(dt,scene);this._checkHotspots(scene);this._checkCollisions(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
       if(this.state.cinematic) this._updateCinematic(dt);
     }
     this._render();
@@ -526,6 +530,40 @@ export class GameEngine {
         char.animTimer -= fms; char.animFrame++;
         if (char.animFrame > anim.endFrame) char.animFrame = anim.startFrame;
       }
+    }
+  }
+
+  _isBlockedAt(x,y,cw,ch,scene){
+    for(const z of (scene.blockedZones||[])){
+      if(x<z.x+z.width&&x+cw>z.x&&y<z.y+z.height&&y+ch>z.y) return true;
+    }
+    return false;
+  }
+
+  _updateArrowMovement(dt,scene){
+    const char=this.state.character,mc=this.project.mainCharacter;
+    if(!char||!mc) return;
+    if(this.state.dialogText||this.state.cinematic||this.state.miniGame||this.state.questLogOpen) return;
+    const moveX=(this.activeKeys.has('ArrowRight')?1:0)-(this.activeKeys.has('ArrowLeft')?1:0);
+    const moveY=(this.activeKeys.has('ArrowDown')?1:0)-(this.activeKeys.has('ArrowUp')?1:0);
+    if(moveX===0&&moveY===0) return;
+    if(char.waypoints.length>0){char.waypoints=[];char.waypointIndex=0;char.moving=false;}
+    const len=Math.sqrt(moveX*moveX+moveY*moveY);
+    const speed=CHAR_SPEED*char.speedMult;
+    const dx=(moveX/len)*speed*dt/1000;
+    const dy=(moveY/len)*speed*dt/1000;
+    if(Math.abs(moveX)>=Math.abs(moveY)) char.facing=moveX>0?'right':'left';
+    else char.facing=moveY>0?'down':'up';
+    const cw=mc.width*char.scale,ch=mc.height*char.scale;
+    const newX=Math.max(0,Math.min(scene.width-cw,char.x+dx));
+    if(!this._isBlockedAt(newX,char.y,cw,ch,scene)) char.x=newX;
+    const newY=Math.max(0,Math.min(scene.height-ch,char.y+dy));
+    if(!this._isBlockedAt(char.x,newY,cw,ch,scene)) char.y=newY;
+    char.moving=true;
+    const anim=this._getCharAnim(char.facing);
+    if(anim&&anim.fps>0){
+      const fms=1000/anim.fps; char.animTimer+=dt;
+      while(char.animTimer>=fms){char.animTimer-=fms;char.animFrame++;if(char.animFrame>anim.endFrame)char.animFrame=anim.startFrame;}
     }
   }
 
@@ -855,6 +893,11 @@ export class GameEngine {
   _handleKeyDown(e) {
     if(this.state.showTitleScreen||this.state.miniGame) return;
     if(e.key==='j'||e.key==='J') this.state.questLogOpen=!this.state.questLogOpen;
+    this.activeKeys.add(e.key);
+  }
+
+  _handleKeyUp(e) {
+    this.activeKeys.delete(e.key);
   }
 
   _scenePos(e) {

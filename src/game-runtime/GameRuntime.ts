@@ -94,6 +94,8 @@ export class GameRuntime {
   private boundClick: (e: MouseEvent) => void
   private boundMouseMove: (e: MouseEvent) => void
   private boundKeyDown: (e: KeyboardEvent) => void
+  private boundKeyUp: (e: KeyboardEvent) => void
+  private activeKeys = new Set<string>()
   private titleScreenButtonRects: { id: string; action: string; x: number; y: number; w: number; h: number }[] = []
   private questButtonRect = { x: 0, y: 0, w: 0, h: 0 }
   private questLogCloseRect = { x: 0, y: 0, w: 0, h: 0 }
@@ -108,6 +110,7 @@ export class GameRuntime {
     this.boundClick = this.handleClick.bind(this)
     this.boundMouseMove = this.handleMouseMove.bind(this)
     this.boundKeyDown = this.handleKeyDown.bind(this)
+    this.boundKeyUp = this.handleKeyUp.bind(this)
   }
 
   private freshState(): GameState {
@@ -141,6 +144,7 @@ export class GameRuntime {
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
     window.addEventListener('keydown', this.boundKeyDown)
+    window.addEventListener('keyup', this.boundKeyUp)
     // Fire game_start events before the first scene loads
     const gameStartEvents = (this.project.events ?? []).filter((e) => this.evTriggers(e).includes('game_start') && e.enabled)
     gameStartEvents.forEach((e) => this.executeEvent(e))
@@ -286,6 +290,7 @@ export class GameRuntime {
     this.canvas.removeEventListener('click', this.boundClick)
     this.canvas.removeEventListener('mousemove', this.boundMouseMove)
     window.removeEventListener('keydown', this.boundKeyDown)
+    window.removeEventListener('keyup', this.boundKeyUp)
     if (this.frameId !== null) {
       cancelAnimationFrame(this.frameId)
       this.frameId = null
@@ -461,6 +466,7 @@ export class GameRuntime {
       this.updateCharacter(dt)
       const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
       if (scene) {
+        this.updateArrowMovement(dt, scene)
         this.updateNpcs(dt, scene)
         this.checkHotspots(scene)
         this.checkCollisions(scene)
@@ -1011,6 +1017,66 @@ export class GameRuntime {
     char.y += dy * ratio
 
     // Advance animation frame
+    const animDef = this.getCharAnim(char.facing)
+    if (animDef && animDef.fps > 0) {
+      const frameMs = 1000 / animDef.fps
+      char.animTimer += dt
+      while (char.animTimer >= frameMs) {
+        char.animTimer -= frameMs
+        char.animFrame++
+        if (char.animFrame > animDef.endFrame) char.animFrame = animDef.startFrame
+      }
+    }
+  }
+
+  // ── Arrow-key movement ────────────────────────────────────────────────────
+
+  private isBlockedAt(x: number, y: number, cw: number, ch: number, scene: Scene): boolean {
+    for (const z of (scene.blockedZones ?? [])) {
+      if (x < z.x + z.width && x + cw > z.x && y < z.y + z.height && y + ch > z.y) return true
+    }
+    return false
+  }
+
+  private updateArrowMovement(dt: number, scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+    if (this.state.dialogText || this.state.cinematic || this.state.miniGame || this.state.questLogOpen) return
+
+    const moveX = (this.activeKeys.has('ArrowRight') ? 1 : 0) - (this.activeKeys.has('ArrowLeft') ? 1 : 0)
+    const moveY = (this.activeKeys.has('ArrowDown') ? 1 : 0) - (this.activeKeys.has('ArrowUp') ? 1 : 0)
+    if (moveX === 0 && moveY === 0) return
+
+    // Cancel any in-progress click-to-move navigation
+    if (char.waypoints.length > 0) {
+      char.waypoints = []
+      char.waypointIndex = 0
+      char.moving = false
+    }
+
+    // Normalise diagonal movement so speed is consistent in all directions
+    const len = Math.sqrt(moveX * moveX + moveY * moveY)
+    const speed = CHAR_SPEED * char.speedMult
+    const dx = (moveX / len) * speed * dt / 1000
+    const dy = (moveY / len) * speed * dt / 1000
+
+    // Facing: dominant axis wins
+    if (Math.abs(moveX) >= Math.abs(moveY)) char.facing = moveX > 0 ? 'right' : 'left'
+    else char.facing = moveY > 0 ? 'down' : 'up'
+
+    const cw = mc.width * char.scale
+    const ch = mc.height * char.scale
+
+    // Slide along walls: test X and Y independently
+    const newX = Math.max(0, Math.min(scene.width - cw, char.x + dx))
+    if (!this.isBlockedAt(newX, char.y, cw, ch, scene)) char.x = newX
+
+    const newY = Math.max(0, Math.min(scene.height - ch, char.y + dy))
+    if (!this.isBlockedAt(char.x, newY, cw, ch, scene)) char.y = newY
+
+    // Keep animation running
+    char.moving = true
     const animDef = this.getCharAnim(char.facing)
     if (animDef && animDef.fps > 0) {
       const frameMs = 1000 / animDef.fps
@@ -1783,6 +1849,11 @@ export class GameRuntime {
     if (e.key === 'j' || e.key === 'J') {
       this.state.questLogOpen = !this.state.questLogOpen
     }
+    this.activeKeys.add(e.key)
+  }
+
+  private handleKeyUp(e: KeyboardEvent) {
+    this.activeKeys.delete(e.key)
   }
 
   private getObjectAt(scene: Scene, x: number, y: number): SceneObject | null {
