@@ -25,18 +25,28 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
   const sC=cc(Math.round(fromX/GRID_CELL)), sR=cr(Math.round(fromY/GRID_CELL));
   let eC=cc(Math.round(toX/GRID_CELL)), eR=cr(Math.round(toY/GRID_CELL));
   walkable[sR][sC]=true;
+  let effToX=toX,effToY=toY;
   if (!walkable[eR][eC]) {
-    let best=Infinity;
-    for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
-      if (!walkable[r][c]) continue;
-      const d=(r-eR)**2+(c-eC)**2; if(d<best){best=d;eR=r;eC=c;}
+    const dr=eR-sR,dc=eC-sC,steps=Math.max(Math.abs(dr),Math.abs(dc),1);
+    let found=false;
+    for(let step=steps;step>=1;step--){
+      const r=Math.round(sR+dr*(step/steps)),c=Math.round(sC+dc*(step/steps));
+      if(r<0||r>=rows||c<0||c>=cols) continue;
+      if(walkable[r][c]){eR=r;eC=c;found=true;effToX=c*GRID_CELL+GRID_CELL/2;effToY=r*GRID_CELL+GRID_CELL/2;break;}
+    }
+    if(!found){
+      let best=Infinity;
+      for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
+        if (!walkable[r][c]) continue;
+        const d=(r-eR)**2+(c-eC)**2; if(d<best){best=d;eR=r;eC=c;}
+      }
     }
   }
   if (sR===eR&&sC===eC) return [{x:toX,y:toY}];
   const key=(r,c)=>r*cols+c, h=(r,c)=>Math.sqrt((r-eR)**2+(c-eC)**2);
-  const open=new Map(), closed=new Set();
+  const open=new Map(), closed=new Set(), allNodes=new Map();
   const root={g:0,h:h(sR,sC),f:0,row:sR,col:sC,parent:null}; root.f=root.h;
-  open.set(key(sR,sC),root);
+  open.set(key(sR,sC),root); allNodes.set(key(sR,sC),root);
   const DIRS=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
   const S2=Math.SQRT2; let endNode=null;
   while (open.size>0) {
@@ -51,13 +61,24 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
       const g=cur.g+(i<4?1:S2), nk=key(nr,nc), ex=open.get(nk);
       if(ex&&ex.g<=g) continue;
       const node={g,h:h(nr,nc),f:0,row:nr,col:nc,parent:cur}; node.f=node.g+node.h;
-      open.set(nk,node);
+      open.set(nk,node); allNodes.set(nk,node);
     }
   }
-  if (!endNode) return [];
+  if (!endNode) {
+    const dr=eR-sR,dc=eC-sC,steps=Math.max(Math.abs(dr),Math.abs(dc),1);
+    for(let step=steps;step>=1;step--){
+      const r=Math.round(sR+dr*(step/steps)),c=Math.round(sC+dc*(step/steps));
+      if(r<0||r>=rows||c<0||c>=cols) continue;
+      if(!walkable[r][c]) continue;
+      if(r===sR&&c===sC) break;
+      const nd=allNodes.get(key(r,c));
+      if(nd&&closed.has(key(r,c))){endNode=nd;effToX=c*GRID_CELL+GRID_CELL/2;effToY=r*GRID_CELL+GRID_CELL/2;break;}
+    }
+    if(!endNode) return [];
+  }
   const raw=[]; let n=endNode;
   while(n){raw.unshift({x:n.col*GRID_CELL+GRID_CELL/2,y:n.row*GRID_CELL+GRID_CELL/2});n=n.parent;}
-  if(raw.length>0) raw[raw.length-1]={x:toX,y:toY};
+  if(raw.length>0) raw[raw.length-1]={x:effToX,y:effToY};
   return smoothPath(raw,walkable,rows,cols);
 }
 

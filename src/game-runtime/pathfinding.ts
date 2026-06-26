@@ -55,14 +55,32 @@ export function findPath(
   // If start is blocked, clear it (character is already there)
   walkable[startRow][startCol] = true
 
-  // If target cell is blocked, find nearest walkable neighbour
+  // If target cell is blocked, find furthest walkable cell along start→target line
+  let effectiveToX = toX, effectiveToY = toY
   if (!walkable[endRow][endCol]) {
-    let best = Infinity
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (!walkable[r][c]) continue
-        const d = (r - endRow) ** 2 + (c - endCol) ** 2
-        if (d < best) { best = d; endRow = r; endCol = c }
+    const dr = endRow - startRow, dc = endCol - startCol
+    const steps = Math.max(Math.abs(dr), Math.abs(dc), 1)
+    let found = false
+    for (let step = steps; step >= 1; step--) {
+      const r = Math.round(startRow + dr * (step / steps))
+      const c = Math.round(startCol + dc * (step / steps))
+      if (r < 0 || r >= rows || c < 0 || c >= cols) continue
+      if (walkable[r][c]) {
+        endRow = r; endCol = c; found = true
+        effectiveToX = c * GRID_CELL + GRID_CELL / 2
+        effectiveToY = r * GRID_CELL + GRID_CELL / 2
+        break
+      }
+    }
+    if (!found) {
+      // Nothing walkable along the line — fall back to nearest walkable anywhere
+      let best = Infinity
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (!walkable[r][c]) continue
+          const d = (r - endRow) ** 2 + (c - endCol) ** 2
+          if (d < best) { best = d; endRow = r; endCol = c }
+        }
       }
     }
   }
@@ -76,10 +94,12 @@ export function findPath(
 
   const open = new Map<number, ANode>()
   const closed = new Set<number>()
+  const allNodes = new Map<number, ANode>()  // every node ever enqueued (for fallback reconstruction)
 
   const root: ANode = { g: 0, h: h(startRow, startCol), f: 0, row: startRow, col: startCol, parent: null }
   root.f = root.h
   open.set(key(startRow, startCol), root)
+  allNodes.set(key(startRow, startCol), root)
 
   // 8-directional neighbours: 4 cardinal then 4 diagonal
   const DIRS = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]
@@ -118,11 +138,29 @@ export function findPath(
       const node: ANode = { g, h: h(nr, nc), f: 0, row: nr, col: nc, parent: current }
       node.f = node.g + node.h
       open.set(nk, node)
+      allNodes.set(nk, node)
     }
   }
 
   if (!endNode) {
-    return []
+    // No path to destination — find furthest reachable cell along start→destination line
+    const dr = endRow - startRow, dc = endCol - startCol
+    const steps = Math.max(Math.abs(dr), Math.abs(dc), 1)
+    for (let step = steps; step >= 1; step--) {
+      const r = Math.round(startRow + dr * (step / steps))
+      const c = Math.round(startCol + dc * (step / steps))
+      if (r < 0 || r >= rows || c < 0 || c >= cols) continue
+      if (!walkable[r][c]) continue
+      if (r === startRow && c === startCol) break
+      const n = allNodes.get(key(r, c))
+      if (n && closed.has(key(r, c))) {
+        endNode = n
+        effectiveToX = c * GRID_CELL + GRID_CELL / 2
+        effectiveToY = r * GRID_CELL + GRID_CELL / 2
+        break
+      }
+    }
+    if (!endNode) return []
   }
 
   // ── Reconstruct ───────────────────────────────────────────────────────────
@@ -132,8 +170,9 @@ export function findPath(
     raw.unshift({ x: n.col * GRID_CELL + GRID_CELL / 2, y: n.row * GRID_CELL + GRID_CELL / 2 })
     n = n.parent
   }
-  // Replace last point with the exact click target
-  if (raw.length > 0) raw[raw.length - 1] = { x: toX, y: toY }
+  // Replace last point with the effective destination
+  // (exact click for normal paths; grid centre for fallback paths to avoid blocked areas)
+  if (raw.length > 0) raw[raw.length - 1] = { x: effectiveToX, y: effectiveToY }
 
   return smoothPath(raw, walkable, rows, cols)
 }
