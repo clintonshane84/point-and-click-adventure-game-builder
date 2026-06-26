@@ -1,6 +1,15 @@
 /**
- * Grid-based A* pathfinding with path smoothing.
- * Used by the game runtime to route the character around blocked zones.
+ * Grid-based A* pathfinding with string-pulling (Simple Stupid Funnel Algorithm).
+ *
+ * Phase 1 — A*: finds the optimal sequence of grid cells from start to end,
+ *   respecting 8-directional movement and Minkowski-inflated obstacle padding.
+ *
+ * Phase 2 — String-pull (SSFA): converts consecutive cell pairs into "portals"
+ *   (the shared edge between adjacent walkable cells), then sweeps through the
+ *   portal sequence maintaining a funnel cone. Whenever a portal boundary forces
+ *   a turn, the tightest corner vertex is emitted as a waypoint. The result is
+ *   the geometrically shortest path through the navigable corridor — a strict
+ *   improvement over greedy line-of-sight smoothing.
  */
 
 export const GRID_CELL = 16  // scene px per grid cell
@@ -11,6 +20,131 @@ interface ANode {
   g: number; h: number; f: number
   row: number; col: number
   parent: ANode | null
+}
+
+interface Portal { lx: number; ly: number; rx: number; ry: number }
+
+// 2D signed cross product of (O→A) × (O→B) in screen coordinates (y-down).
+//   > 0  →  B is to the right of ray O→A  (clockwise in screen space)
+//   < 0  →  B is to the left  of ray O→A  (counter-clockwise in screen space)
+//   = 0  →  collinear
+function cross2D(
+  ox: number, oy: number,
+  ax: number, ay: number,
+  bx: number, by: number,
+): number {
+  return (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+}
+
+// Build a portal for each step in the A* cell path.
+// The portal is the shared edge between consecutive cells, oriented so that
+// L (left) and R (right) are consistent with the direction of travel —
+// i.e. cross2D(prevCentre, L, R) > 0 for all portals.
+// Diagonal moves produce a degenerate portal (L === R = shared corner vertex).
+// The final element is always a degenerate portal at the exact destination.
+function buildPortals(cells: ANode[], endX: number, endY: number): Portal[] {
+  const G = GRID_CELL
+  const portals: Portal[] = []
+
+  for (let i = 1; i < cells.length; i++) {
+    const a = cells[i - 1], b = cells[i]
+    const dc = b.col - a.col, dr = b.row - a.row
+    let lx: number, ly: number, rx: number, ry: number
+
+    if (dc === 1 && dr === 0) {          // moving right
+      lx = b.col * G;  ly = a.row * G
+      rx = b.col * G;  ry = (a.row + 1) * G
+    } else if (dc === -1 && dr === 0) {  // moving left
+      lx = a.col * G;  ly = (a.row + 1) * G
+      rx = a.col * G;  ry = a.row * G
+    } else if (dc === 0 && dr === 1) {   // moving down
+      lx = (a.col + 1) * G;  ly = b.row * G
+      rx = a.col * G;         ry = b.row * G
+    } else if (dc === 0 && dr === -1) {  // moving up
+      lx = a.col * G;         ly = a.row * G
+      rx = (a.col + 1) * G;  ry = a.row * G
+    } else {                              // diagonal — shared corner vertex
+      lx = rx = Math.max(a.col, b.col) * G
+      ly = ry = Math.max(a.row, b.row) * G
+    }
+
+    portals.push({ lx, ly, rx, ry })
+  }
+
+  // Final degenerate portal: the exact click/destination point
+  portals.push({ lx: endX, ly: endY, rx: endX, ry: endY })
+  return portals
+}
+
+// Simple Stupid Funnel Algorithm (SSFA).
+// Sweeps the portal sequence once, maintaining a left/right funnel cone from
+// the current apex. When a portal boundary forces the cone to cross itself, the
+// constraining corner becomes the next waypoint and the scan restarts from there.
+// Runs in O(n) time (each portal is processed at most twice across all restarts).
+function stringPull(
+  startX: number, startY: number,
+  portals: Portal[],
+): PathPoint[] {
+  if (portals.length === 0) return [{ x: startX, y: startY }]
+
+  const result: PathPoint[] = [{ x: startX, y: startY }]
+
+  // Apex = last confirmed waypoint.  fL/fR = current funnel boundary points.
+  let ax = startX, ay = startY
+  let flx = startX, fly = startY   // funnel left boundary
+  let frx = startX, fry = startY   // funnel right boundary
+  let iL = 0, iR = 0               // portal indices where fL / fR were last set
+
+  for (let i = 0; i < portals.length; i++) {
+    const { lx, ly, rx, ry } = portals[i]
+
+    // ── Right boundary update ─────────────────────────────────────────────────
+    // A new R tightens the funnel when it is to the LEFT of (apex→fR), i.e.
+    // inside the funnel from the right-boundary perspective.
+    if (cross2D(ax, ay, frx, fry, rx, ry) <= 0) {
+      const sameApexR = (ax === frx && ay === fry)
+      if (sameApexR || cross2D(ax, ay, flx, fly, rx, ry) >= 0) {
+        // R is still on the right side of the left boundary — tighten
+        frx = rx; fry = ry; iR = i
+      } else {
+        // R crossed the left boundary → fL is the next waypoint; restart from iL
+        result.push({ x: flx, y: fly })
+        ax = flx; ay = fly
+        const restart = iL + 1
+        flx = ax; fly = ay; frx = ax; fry = ay
+        iL = restart; iR = restart
+        i = restart - 1   // loop i++ → i = restart
+        continue
+      }
+    }
+
+    // ── Left boundary update ──────────────────────────────────────────────────
+    // A new L tightens the funnel when it is to the RIGHT of (apex→fL).
+    if (cross2D(ax, ay, flx, fly, lx, ly) >= 0) {
+      const sameApexL = (ax === flx && ay === fly)
+      if (sameApexL || cross2D(ax, ay, frx, fry, lx, ly) <= 0) {
+        // L is still on the left side of the right boundary — tighten
+        flx = lx; fly = ly; iL = i
+      } else {
+        // L crossed the right boundary → fR is the next waypoint; restart from iR
+        result.push({ x: frx, y: fry })
+        ax = frx; ay = fry
+        const restart = iR + 1
+        flx = ax; fly = ay; frx = ax; fry = ay
+        iL = restart; iR = restart
+        i = restart - 1
+        continue
+      }
+    }
+  }
+
+  // Add the destination (last portal's point) if not already there
+  const end = portals[portals.length - 1]
+  const last = result[result.length - 1]
+  if (last.x !== end.lx || last.y !== end.ly) {
+    result.push({ x: end.lx, y: end.ly })
+  }
+  return result
 }
 
 export function findPath(
@@ -27,7 +161,7 @@ export function findPath(
   const cols = Math.ceil(sceneWidth / GRID_CELL)
   const rows = Math.ceil(sceneHeight / GRID_CELL)
 
-  // Inflate obstacles by half character size (Minkowski sum) so the center
+  // Inflate obstacles by half character size (Minkowski sum) so the centre
   // of the character never gets closer to a wall than its own half-width/height.
   const padX = Math.max(0, charWidth / 2 - 1)
   const padY = Math.max(0, charHeight / 2 - 1)
@@ -94,7 +228,7 @@ export function findPath(
 
   const open = new Map<number, ANode>()
   const closed = new Set<number>()
-  const allNodes = new Map<number, ANode>()  // every node ever enqueued (for fallback reconstruction)
+  const allNodes = new Map<number, ANode>()  // every node ever enqueued (for fallback)
 
   const root: ANode = { g: 0, h: h(startRow, startCol), f: 0, row: startRow, col: startCol, parent: null }
   root.f = root.h
@@ -163,55 +297,12 @@ export function findPath(
     if (!endNode) return []
   }
 
-  // ── Reconstruct ───────────────────────────────────────────────────────────
-  const raw: PathPoint[] = []
+  // ── Reconstruct cell path ─────────────────────────────────────────────────
+  const cells: ANode[] = []
   let n: ANode | null = endNode
-  while (n) {
-    raw.unshift({ x: n.col * GRID_CELL + GRID_CELL / 2, y: n.row * GRID_CELL + GRID_CELL / 2 })
-    n = n.parent
-  }
-  // Replace last point with the effective destination
-  // (exact click for normal paths; grid centre for fallback paths to avoid blocked areas)
-  if (raw.length > 0) raw[raw.length - 1] = { x: effectiveToX, y: effectiveToY }
+  while (n) { cells.unshift(n); n = n.parent }
 
-  return smoothPath(raw, walkable, rows, cols)
-}
-
-// ── Path smoothing (skip intermediate waypoints in line-of-sight) ─────────────
-
-function smoothPath(
-  path: PathPoint[],
-  walkable: boolean[][],
-  rows: number,
-  cols: number,
-): PathPoint[] {
-  if (path.length <= 2) return path
-  const result: PathPoint[] = [path[0]]
-  let i = 0
-  while (i < path.length - 1) {
-    let j = path.length - 1
-    while (j > i + 1 && !lineOfSight(path[i], path[j], walkable, rows, cols)) j--
-    result.push(path[j])
-    i = j
-  }
-  return result
-}
-
-function lineOfSight(
-  a: PathPoint, b: PathPoint,
-  walkable: boolean[][], rows: number, cols: number,
-): boolean {
-  let c0 = Math.floor(a.x / GRID_CELL), r0 = Math.floor(a.y / GRID_CELL)
-  const c1 = Math.floor(b.x / GRID_CELL), r1 = Math.floor(b.y / GRID_CELL)
-  const dc = Math.abs(c1 - c0), dr = Math.abs(r1 - r0)
-  const sc = c0 < c1 ? 1 : -1, sr = r0 < r1 ? 1 : -1
-  let err = dc - dr
-  for (;;) {
-    if (r0 < 0 || r0 >= rows || c0 < 0 || c0 >= cols) return false
-    if (!walkable[r0][c0]) return false
-    if (c0 === c1 && r0 === r1) return true
-    const e2 = 2 * err
-    if (e2 > -dr) { err -= dr; c0 += sc }
-    if (e2 < dc)  { err += dc; r0 += sr }
-  }
+  // ── Build portals + string-pull ───────────────────────────────────────────
+  const portals = buildPortals(cells, effectiveToX, effectiveToY)
+  return stringPull(fromX, fromY, portals)
 }
