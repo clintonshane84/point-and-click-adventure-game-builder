@@ -80,7 +80,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
     for(let step=steps;step>=1;step--){
       const r=Math.round(sR+dr*(step/steps)),c=Math.round(sC+dc*(step/steps));
       if(r<0||r>=rows||c<0||c>=cols) continue;
-      if(walkable[r][c]){eR=r;eC=c;found=true;effToX=c*GRID_CELL+GRID_CELL/2;effToY=r*GRID_CELL+GRID_CELL/2;break;}
+      if(walkable[r][c]){eR=r;eC=c;found=true;effToX=dc>0?(c+1)*GRID_CELL:dc<0?c*GRID_CELL:c*GRID_CELL+GRID_CELL/2;effToY=dr>0?(r+1)*GRID_CELL:dr<0?r*GRID_CELL:r*GRID_CELL+GRID_CELL/2;break;}
     }
     if(!found){
       let best=Infinity;
@@ -120,7 +120,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
       if(!walkable[r][c]) continue;
       if(r===sR&&c===sC) break;
       const nd=allNodes.get(key(r,c));
-      if(nd&&closed.has(key(r,c))){endNode=nd;effToX=c*GRID_CELL+GRID_CELL/2;effToY=r*GRID_CELL+GRID_CELL/2;break;}
+      if(nd&&closed.has(key(r,c))){endNode=nd;effToX=dc>0?(c+1)*GRID_CELL:dc<0?c*GRID_CELL:c*GRID_CELL+GRID_CELL/2;effToY=dr>0?(r+1)*GRID_CELL:dr<0?r*GRID_CELL:r*GRID_CELL+GRID_CELL/2;break;}
     }
     if(!endNode) return [];
   }
@@ -465,11 +465,10 @@ export class GameEngine {
     }
   }
   _findSafeArrival(scene,mc,nomX,nomY,side) {
-    const padX=Math.max(0,mc.width/2-1),padY=Math.max(0,mc.height/2-1);
     const zones=scene.blockedZones||[];
     const overlaps=(x,y)=>{
       for(const z of zones){
-        if(x-padX<z.x+z.width&&x+mc.width+padX>z.x&&y-padY<z.y+z.height&&y+mc.height+padY>z.y) return true;
+        if(x<z.x+z.width&&x+mc.width>z.x&&y<z.y+z.height&&y+mc.height>z.y) return true;
       }
       return false;
     };

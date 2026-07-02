@@ -202,8 +202,9 @@ export function findPath(
       if (r < 0 || r >= rows || c < 0 || c >= cols) continue
       if (walkable[r][c]) {
         endRow = r; endCol = c; found = true
-        effectiveToX = c * GRID_CELL + GRID_CELL / 2
-        effectiveToY = r * GRID_CELL + GRID_CELL / 2
+        // Use the cell edge facing the destination so the character gets as close as possible
+        effectiveToX = dc > 0 ? (c + 1) * GRID_CELL : dc < 0 ? c * GRID_CELL : c * GRID_CELL + GRID_CELL / 2
+        effectiveToY = dr > 0 ? (r + 1) * GRID_CELL : dr < 0 ? r * GRID_CELL : r * GRID_CELL + GRID_CELL / 2
         break
       }
     }
@@ -290,8 +291,9 @@ export function findPath(
       const n = allNodes.get(key(r, c))
       if (n && closed.has(key(r, c))) {
         endNode = n
-        effectiveToX = c * GRID_CELL + GRID_CELL / 2
-        effectiveToY = r * GRID_CELL + GRID_CELL / 2
+        // Use the cell edge facing the destination so the character stops as close as possible
+        effectiveToX = dc > 0 ? (c + 1) * GRID_CELL : dc < 0 ? c * GRID_CELL : c * GRID_CELL + GRID_CELL / 2
+        effectiveToY = dr > 0 ? (r + 1) * GRID_CELL : dr < 0 ? r * GRID_CELL : r * GRID_CELL + GRID_CELL / 2
         break
       }
     }

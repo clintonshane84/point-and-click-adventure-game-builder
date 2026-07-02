@@ -647,17 +647,15 @@ export class GameRuntime {
     nomY: number,
     side: SceneExitSide,
   ): { x: number; y: number } {
-    const padX = Math.max(0, mc.width / 2 - 1)
-    const padY = Math.max(0, mc.height / 2 - 1)
     const zones = scene.blockedZones ?? []
 
     const overlaps = (x: number, y: number): boolean => {
       for (const z of zones) {
         if (
-          x - padX < z.x + z.width &&
-          x + mc.width + padX > z.x &&
-          y - padY < z.y + z.height &&
-          y + mc.height + padY > z.y
+          x < z.x + z.width &&
+          x + mc.width > z.x &&
+          y < z.y + z.height &&
+          y + mc.height > z.y
         ) return true
       }
       return false
