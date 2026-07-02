@@ -62,11 +62,11 @@ function stringPull(startX,startY,portals){
 function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY, charWidth=0, charHeight=0) {
   const cols = Math.ceil(sceneWidth / GRID_CELL);
   const rows = Math.ceil(sceneHeight / GRID_CELL);
-  const padX=Math.max(0,charWidth/2-1), padY=Math.max(0,charHeight/2-1);
+  const halfW=charWidth/2, halfH=charHeight/2;
   const walkable = Array.from({length: rows}, () => new Array(cols).fill(true));
   for (const z of blockedZones) {
-    const c0=Math.max(0,Math.floor((z.x-padX)/GRID_CELL)), c1=Math.min(cols,Math.ceil((z.x+z.width+padX)/GRID_CELL));
-    const r0=Math.max(0,Math.floor((z.y-padY)/GRID_CELL)), r1=Math.min(rows,Math.ceil((z.y+z.height+padY)/GRID_CELL));
+    const c0=Math.max(0,Math.round((z.x-halfW)/GRID_CELL)), c1=Math.min(cols,Math.round((z.x+z.width+halfW)/GRID_CELL));
+    const r0=Math.max(0,Math.round((z.y-halfH)/GRID_CELL)), r1=Math.min(rows,Math.round((z.y+z.height+halfH)/GRID_CELL));
     for (let r=r0;r<r1;r++) for (let c=c0;c<c1;c++) walkable[r][c]=false;
   }
   const cc=(c)=>Math.max(0,Math.min(cols-1,c)), cr=(r)=>Math.max(0,Math.min(rows-1,r));

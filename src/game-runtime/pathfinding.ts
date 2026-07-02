@@ -161,18 +161,19 @@ export function findPath(
   const cols = Math.ceil(sceneWidth / GRID_CELL)
   const rows = Math.ceil(sceneHeight / GRID_CELL)
 
-  // Inflate obstacles by half character size (Minkowski sum) so the centre
-  // of the character never gets closer to a wall than its own half-width/height.
-  const padX = Math.max(0, charWidth / 2 - 1)
-  const padY = Math.max(0, charHeight / 2 - 1)
+  // Mark grid cells blocked when the character (centred on the cell centre) would
+  // overlap the obstacle.  Using Math.round instead of floor/ceil avoids the
+  // up-to-(GRID_CELL-1) px over-expansion that floor/ceil introduce per side.
+  const halfW = charWidth / 2
+  const halfH = charHeight / 2
 
   // Build walkability grid (true = walkable)
   const walkable: boolean[][] = Array.from({ length: rows }, () => new Array(cols).fill(true))
   for (const z of blockedZones) {
-    const c0 = Math.max(0, Math.floor((z.x - padX) / GRID_CELL))
-    const c1 = Math.min(cols, Math.ceil((z.x + z.width + padX) / GRID_CELL))
-    const r0 = Math.max(0, Math.floor((z.y - padY) / GRID_CELL))
-    const r1 = Math.min(rows, Math.ceil((z.y + z.height + padY) / GRID_CELL))
+    const c0 = Math.max(0, Math.round((z.x - halfW) / GRID_CELL))
+    const c1 = Math.min(cols, Math.round((z.x + z.width + halfW) / GRID_CELL))
+    const r0 = Math.max(0, Math.round((z.y - halfH) / GRID_CELL))
+    const r1 = Math.min(rows, Math.round((z.y + z.height + halfH) / GRID_CELL))
     for (let r = r0; r < r1; r++)
       for (let c = c0; c < c1; c++)
         walkable[r][c] = false
