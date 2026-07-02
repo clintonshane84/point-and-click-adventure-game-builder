@@ -136,6 +136,7 @@ const CHAR_SPEED = 250;
 export class GameEngine {
   constructor(canvas, project) {
     this.canvas = canvas;
+    this.canvas.draggable = false;
     this.ctx = canvas.getContext('2d');
     this.project = project;
     this.imageCache = new Map();
