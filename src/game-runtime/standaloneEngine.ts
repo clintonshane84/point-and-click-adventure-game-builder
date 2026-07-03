@@ -80,7 +80,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
     for(let step=steps;step>=1;step--){
       const r=Math.round(sR+dr*(step/steps)),c=Math.round(sC+dc*(step/steps));
       if(r<0||r>=rows||c<0||c>=cols) continue;
-      if(walkable[r][c]){eR=r;eC=c;found=true;effToX=dc>0?(c+1)*GRID_CELL:dc<0?c*GRID_CELL:c*GRID_CELL+GRID_CELL/2;effToY=dr>0?(r+1)*GRID_CELL:dr<0?r*GRID_CELL:r*GRID_CELL+GRID_CELL/2;break;}
+      if(walkable[r][c]){eR=r;eC=c;found=true;{const gx=c*GRID_CELL+GRID_CELL/2,gy=r*GRID_CELL+GRID_CELL/2;let bx=gx,by=gy;if(dc>0){let m=Infinity;for(const z of blockedZones){const b=z.x-halfW;if(b>gx&&b<=(c+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))bx=m-0.5;}else if(dc<0){let m=-Infinity;for(const z of blockedZones){const b=z.x+z.width+halfW;if(b<gx&&b>=c*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))bx=m+0.5;}if(dr>0){let m=Infinity;for(const z of blockedZones){const b=z.y-halfH;if(b>gy&&b<=(r+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))by=m-0.5;}else if(dr<0){let m=-Infinity;for(const z of blockedZones){const b=z.y+z.height+halfH;if(b<gy&&b>=r*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))by=m+0.5;}effToX=bx;effToY=by;}break;}
     }
     if(!found){
       let best=Infinity;
@@ -120,7 +120,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
       if(!walkable[r][c]) continue;
       if(r===sR&&c===sC) break;
       const nd=allNodes.get(key(r,c));
-      if(nd&&closed.has(key(r,c))){endNode=nd;effToX=dc>0?(c+1)*GRID_CELL:dc<0?c*GRID_CELL:c*GRID_CELL+GRID_CELL/2;effToY=dr>0?(r+1)*GRID_CELL:dr<0?r*GRID_CELL:r*GRID_CELL+GRID_CELL/2;break;}
+      if(nd&&closed.has(key(r,c))){endNode=nd;{const gx=c*GRID_CELL+GRID_CELL/2,gy=r*GRID_CELL+GRID_CELL/2;let bx=gx,by=gy;if(dc>0){let m=Infinity;for(const z of blockedZones){const b=z.x-halfW;if(b>gx&&b<=(c+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))bx=m-0.5;}else if(dc<0){let m=-Infinity;for(const z of blockedZones){const b=z.x+z.width+halfW;if(b<gx&&b>=c*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))bx=m+0.5;}if(dr>0){let m=Infinity;for(const z of blockedZones){const b=z.y-halfH;if(b>gy&&b<=(r+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))by=m-0.5;}else if(dr<0){let m=-Infinity;for(const z of blockedZones){const b=z.y+z.height+halfH;if(b<gy&&b>=r*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))by=m+0.5;}effToX=bx;effToY=by;}break;}
     }
     if(!endNode) return [];
   }

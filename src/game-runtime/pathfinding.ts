@@ -202,9 +202,17 @@ export function findPath(
       if (r < 0 || r >= rows || c < 0 || c >= cols) continue
       if (walkable[r][c]) {
         endRow = r; endCol = c; found = true
-        // Use the cell edge facing the destination so the character gets as close as possible
-        effectiveToX = dc > 0 ? (c + 1) * GRID_CELL : dc < 0 ? c * GRID_CELL : c * GRID_CELL + GRID_CELL / 2
-        effectiveToY = dr > 0 ? (r + 1) * GRID_CELL : dr < 0 ? r * GRID_CELL : r * GRID_CELL + GRID_CELL / 2
+        // Place character centre at the nearest safe position: use inflated zone boundary
+        // rather than cell edge so arrow-key collision (exact pixel AABB) agrees.
+        {
+          const gx = c * GRID_CELL + GRID_CELL / 2, gy = r * GRID_CELL + GRID_CELL / 2
+          let bx = gx, by = gy
+          if (dc > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.x - halfW; if (b > gx && b <= (c+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) bx = m - 0.5 }
+          else if (dc < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.x + z.width + halfW; if (b < gx && b >= c*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) bx = m + 0.5 }
+          if (dr > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.y - halfH; if (b > gy && b <= (r+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) by = m - 0.5 }
+          else if (dr < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.y + z.height + halfH; if (b < gy && b >= r*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) by = m + 0.5 }
+          effectiveToX = bx; effectiveToY = by
+        }
         break
       }
     }
@@ -291,9 +299,15 @@ export function findPath(
       const n = allNodes.get(key(r, c))
       if (n && closed.has(key(r, c))) {
         endNode = n
-        // Use the cell edge facing the destination so the character stops as close as possible
-        effectiveToX = dc > 0 ? (c + 1) * GRID_CELL : dc < 0 ? c * GRID_CELL : c * GRID_CELL + GRID_CELL / 2
-        effectiveToY = dr > 0 ? (r + 1) * GRID_CELL : dr < 0 ? r * GRID_CELL : r * GRID_CELL + GRID_CELL / 2
+        {
+          const gx = c * GRID_CELL + GRID_CELL / 2, gy = r * GRID_CELL + GRID_CELL / 2
+          let bx = gx, by = gy
+          if (dc > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.x - halfW; if (b > gx && b <= (c+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) bx = m - 0.5 }
+          else if (dc < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.x + z.width + halfW; if (b < gx && b >= c*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) bx = m + 0.5 }
+          if (dr > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.y - halfH; if (b > gy && b <= (r+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) by = m - 0.5 }
+          else if (dr < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.y + z.height + halfH; if (b < gy && b >= r*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) by = m + 0.5 }
+          effectiveToX = bx; effectiveToY = by
+        }
         break
       }
     }
