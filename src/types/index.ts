@@ -12,6 +12,7 @@ export type EditorType =
   | 'titlescreen'
   | 'stage'
   | 'goal'
+  | 'quest'
   | 'cursor'
   | 'preview'
   | 'export'
@@ -147,7 +148,7 @@ export interface Scene {
 }
 
 // Event types
-export type TriggerType = 'click' | 'hover' | 'enter' | 'exit' | 'keypress'
+export type TriggerType = 'click' | 'hover' | 'enter' | 'exit' | 'keypress' | 'stage_start' | 'game_start' | 'collision'
 
 export type ActionType =
   | 'navigate_scene'
@@ -156,10 +157,15 @@ export type ActionType =
   | 'set_variable'
   | 'show_object'
   | 'hide_object'
+  | 'remove_object'
+  | 'spawn_object'
   | 'play_animation'
   | 'stop_animation'
   | 'play_cinematic'
   | 'launch_minigame'
+  | 'trigger_event'
+  | 'add_quest'
+  | 'complete_quest'
 
 export interface EventAction {
   id: string
@@ -169,14 +175,39 @@ export interface EventAction {
   entryX?: number          // hero X in destination scene (navigate_scene only)
   entryY?: number          // hero Y in destination scene (navigate_scene only)
   entryFacing?: FacingDirection  // hero facing in destination scene (navigate_scene only)
+  spawnSceneId?: string    // spawn_object: target scene ID (defaults to current scene)
+  spawnX?: number          // spawn_object: X position
+  spawnY?: number          // spawn_object: Y position
+  onWinActions?: EventAction[]   // launch_minigame: actions to run when result === 'win'
+  onLoseActions?: EventAction[]  // launch_minigame: actions to run when result === 'lose'
+  onExitActions?: EventAction[]  // launch_minigame: actions to run when result === 'exit'
+  repeatOnResult?: 'lose' | 'exit' | 'any'  // launch_minigame: re-launch this game on matching result
+  repeatMax?: number                          // launch_minigame: max re-launches (0 = infinite)
+}
+
+export interface EventCondition {
+  id: string
+  variable: string
+  operator: ConditionOperator
+  value: string
+}
+
+export interface EventBranch {
+  id: string
+  conditions: EventCondition[]
+  logic: 'AND' | 'OR'
+  actions: EventAction[]
 }
 
 export interface EventTrigger {
   id: string
   sceneId: string
   objectId: string
+  stageId?: string     // set for stage_start events; empty for scene-object and game_start events
   trigger: TriggerType
+  triggers?: TriggerType[]  // additional triggers — event fires when any trigger activates (OR)
   actions: EventAction[]
+  branches?: EventBranch[]
   enabled: boolean
 }
 
@@ -299,6 +330,13 @@ export interface TitleScreenConfig {
 }
 
 // Stage types
+export interface StageVariable {
+  id: string
+  name: string
+  type: 'string' | 'number' | 'boolean'
+  defaultValue: string
+}
+
 export interface Stage {
   id: string
   name: string
@@ -306,6 +344,7 @@ export interface Stage {
   startingSceneId: string
   sceneIds: string[]
   description: string
+  variables?: StageVariable[]
 }
 
 // Goal types
@@ -349,11 +388,17 @@ export interface CursorConfig {
 }
 
 // Mini-game types
+export interface SpriteSlotBinding {
+  sheetId: string   // references project.spriteSheets[].id
+  animId:  string   // references Animation.id within that sheet; empty = URL-only (no frame animation)
+}
+
 export interface MiniGame {
   id: string
   name: string
   description: string
   source: string        // full JS module source (ES module with default export)
+  spriteMap?: Record<string, SpriteSlotBinding>  // slotName → { sheetId, animId }
 }
 
 // Cinematic types
@@ -395,6 +440,19 @@ export interface Cinematic {
   completionValue: string
 }
 
+// Quest types
+export interface QuestObjective {
+  id: string
+  text: string
+}
+
+export interface Quest {
+  id: string
+  name: string
+  description: string
+  objectives?: QuestObjective[]
+}
+
 // Top-level project
 export interface GameProject {
   id: string
@@ -416,4 +474,5 @@ export interface GameProject {
   goals: Goal[]
   cursorConfig: CursorConfig
   miniGames?: MiniGame[]
+  quests?: Quest[]
 }

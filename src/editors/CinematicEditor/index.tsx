@@ -211,19 +211,43 @@ function StepProperties({
       )}
 
       {/* set_variable */}
-      {step.type === 'set_variable' && (
-        <div>
-          <label className="text-xs text-gray-400 block mb-1">Variable Assignment</label>
-          <input
-            type="text"
-            value={step.variable ?? ''}
-            onChange={(e) => onUpdate({ variable: e.target.value })}
-            placeholder="variableName=value"
-            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
-          />
-          <p className="text-xs text-gray-600 mt-1">Format: <code className="text-gray-400">name=value</code></p>
-        </div>
-      )}
+      {step.type === 'set_variable' && (() => {
+        const expr = step.variable ?? ''
+        let op = '=', varName = '', varVal = ''
+        const addIdx = expr.indexOf('+=')
+        const subIdx = expr.indexOf('-=')
+        if (addIdx !== -1) {
+          op = '+='; varName = expr.slice(0, addIdx).trim(); varVal = expr.slice(addIdx + 2).trim()
+        } else if (subIdx !== -1) {
+          op = '-='; varName = expr.slice(0, subIdx).trim(); varVal = expr.slice(subIdx + 2).trim()
+        } else {
+          const eqIdx = expr.indexOf('=')
+          if (eqIdx !== -1) { varName = expr.slice(0, eqIdx).trim(); varVal = expr.slice(eqIdx + 1).trim() }
+          else { varName = expr }
+        }
+        const rebuild = (name: string, operator: string, val: string) => onUpdate({ variable: `${name}${operator}${val}` })
+        return (
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Variable Assignment</label>
+            <div className="flex gap-2">
+              <input type="text" value={varName}
+                onChange={(e) => rebuild(e.target.value, op, varVal)}
+                placeholder="variableName"
+                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono" />
+              <select value={op} onChange={(e) => rebuild(varName, e.target.value, varVal)}
+                className="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono">
+                <option value="=">=</option>
+                <option value="+=">+=</option>
+                <option value="-=">-=</option>
+              </select>
+              <input type="text" value={varVal}
+                onChange={(e) => rebuild(varName, op, e.target.value)}
+                placeholder={op === '=' ? 'value' : 'number'}
+                className="w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

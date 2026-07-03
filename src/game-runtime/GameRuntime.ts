@@ -2,6 +2,7 @@ import type {
   GameProject, Scene, SceneObject, EventTrigger, EventAction,
   FacingDirection, SpriteSheet, Animation, NpcCharacter, CinematicStep,
   CinematicCompletionAction, NpcMovementInstruction, SceneExitSide,
+  Stage, Goal, GoalCondition, EventCondition, TriggerType,
 } from '../types'
 import { findPath } from './pathfinding'
 import type { PathPoint } from './pathfinding'
@@ -58,6 +59,7 @@ interface CinematicPlayState {
 
 interface GameState {
   currentSceneId: string
+  currentStageId: string | null
   variables: Record<string, string | number | boolean>
   visitedScenes: string[]
   running: boolean
@@ -70,6 +72,9 @@ interface GameState {
   miniGame: { returnSceneId: string; instance: { destroy(): void } | null } | null
   npcStates: Map<string, NpcRuntimeState>
   showTitleScreen: boolean
+  activeQuestIds: string[]
+  completedQuestIds: string[]
+  questLogOpen: boolean
 }
 
 const CHAR_SPEED = 250  // scene px / second
@@ -81,11 +86,19 @@ export class GameRuntime {
   private state: GameState
   private imageCache = new Map<string, HTMLImageElement>()
   private objectVisibility = new Map<string, boolean>()
+  private removedObjects = new Set<string>()
+  private activeCollisions = new Set<string>()
+  private repeatCounts = new Map<string, number>()
   private frameId: number | null = null
   private lastFrameTime = 0
   private boundClick: (e: MouseEvent) => void
   private boundMouseMove: (e: MouseEvent) => void
+  private boundKeyDown: (e: KeyboardEvent) => void
+  private boundKeyUp: (e: KeyboardEvent) => void
+  private activeKeys = new Set<string>()
   private titleScreenButtonRects: { id: string; action: string; x: number; y: number; w: number; h: number }[] = []
+  private questButtonRect = { x: 0, y: 0, w: 0, h: 0 }
+  private questLogCloseRect = { x: 0, y: 0, w: 0, h: 0 }
 
   constructor(canvas: HTMLCanvasElement, project: GameProject) {
     this.canvas = canvas
@@ -96,6 +109,8 @@ export class GameRuntime {
     this.state = this.freshState()
     this.boundClick = this.handleClick.bind(this)
     this.boundMouseMove = this.handleMouseMove.bind(this)
+    this.boundKeyDown = this.handleKeyDown.bind(this)
+    this.boundKeyUp = this.handleKeyUp.bind(this)
   }
 
   private freshState(): GameState {
@@ -103,6 +118,7 @@ export class GameRuntime {
     const hasTitleScreen = !!(ts?.titleText || (ts?.buttons && ts.buttons.length > 0))
     return {
       currentSceneId: this.project.settings.startingSceneId || this.project.scenes[0]?.id || '',
+      currentStageId: null,
       variables: {},
       visitedScenes: [],
       running: false,
@@ -115,6 +131,9 @@ export class GameRuntime {
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
       miniGame: null,
+      activeQuestIds: [],
+      completedQuestIds: [],
+      questLogOpen: false,
     }
   }
 
@@ -124,6 +143,12 @@ export class GameRuntime {
     this.lastFrameTime = 0
     this.canvas.addEventListener('click', this.boundClick)
     this.canvas.addEventListener('mousemove', this.boundMouseMove)
+    window.addEventListener('keydown', this.boundKeyDown)
+    window.addEventListener('keyup', this.boundKeyUp)
+    // Fire game_start events before the first scene loads
+    const gameStartEvents = (this.project.events ?? []).filter((e) => this.evTriggers(e).includes('game_start') && e.enabled)
+    gameStartEvents.forEach((e) => this.executeEvent(e))
+    this.initStageForScene(this.state.currentSceneId)
     if (this.state.showTitleScreen) {
       const ts = this.project.titleScreen
       if (ts?.backgroundImageUrl) this.loadImage(ts.backgroundImageUrl)
@@ -133,10 +158,139 @@ export class GameRuntime {
     this.renderLoop()
   }
 
+  // ── Stage variable helpers ────────────────────────────────────────────────
+
+  private getStageForScene(sceneId: string): Stage | undefined {
+    return (this.project.stages ?? []).find((s) => s.sceneIds.includes(sceneId))
+  }
+
+  private initStageForScene(sceneId: string): void {
+    const stage = this.getStageForScene(sceneId)
+    if (!stage || stage.id === this.state.currentStageId) return
+    this.state.currentStageId = stage.id
+    for (const v of stage.variables ?? []) {
+      const val = v.type === 'number' ? (Number(v.defaultValue) || 0)
+                : v.type === 'boolean' ? (v.defaultValue === 'true')
+                : v.defaultValue
+      this.state.variables[v.name] = val
+    }
+    // Fire stage_start events for this stage
+    const stageStartEvents = (this.project.events ?? []).filter(
+      (e) => this.evTriggers(e).includes('stage_start') && e.stageId === stage.id && e.enabled
+    )
+    stageStartEvents.forEach((e) => this.executeEvent(e))
+  }
+
+  // ── Variable expression parser ────────────────────────────────────────────
+  // Supports:  name=value  (assign)
+  //            name+=N     (add N to current numeric value)
+  //            name-=N     (subtract N from current numeric value)
+
+  private applyVariableExpression(expr: string): void {
+    const addIdx = expr.indexOf('+=')
+    const subIdx = expr.indexOf('-=')
+    if (addIdx !== -1) {
+      const key = expr.slice(0, addIdx).trim()
+      const amt = Number(expr.slice(addIdx + 2).trim())
+      if (key && !isNaN(amt)) this.state.variables[key] = (Number(this.state.variables[key] ?? 0) + amt)
+      return
+    }
+    if (subIdx !== -1) {
+      const key = expr.slice(0, subIdx).trim()
+      const amt = Number(expr.slice(subIdx + 2).trim())
+      if (key && !isNaN(amt)) this.state.variables[key] = (Number(this.state.variables[key] ?? 0) - amt)
+      return
+    }
+    const eqIdx = expr.indexOf('=')
+    if (eqIdx !== -1) {
+      const key = expr.slice(0, eqIdx).trim()
+      const val = expr.slice(eqIdx + 1).trim()
+      if (key) this.state.variables[key] = val
+    }
+  }
+
+  // ── Goal evaluation ───────────────────────────────────────────────────────
+
+  private evaluateGoals(): void {
+    const stageId = this.state.currentStageId
+    if (!stageId) return
+    const goals = (this.project.goals ?? []).filter((g) => g.stageId === stageId && !g.completed)
+    for (const goal of goals) {
+      if (this.checkGoalConditions(goal)) {
+        this.completeGoal(goal)
+        return
+      }
+    }
+  }
+
+  private checkGoalConditions(goal: Goal): boolean {
+    if (goal.conditions.length === 0) return false
+    const results = goal.conditions.map((c) => this.checkCondition(c))
+    return goal.logic === 'AND' ? results.every(Boolean) : results.some(Boolean)
+  }
+
+  private checkCondition(cond: GoalCondition): boolean {
+    const raw = this.state.variables[cond.target]
+    const strVal = raw !== undefined ? String(raw) : ''
+    switch (cond.operator) {
+      case 'equals':       return strVal === cond.value
+      case 'not_equals':   return strVal !== cond.value
+      case 'greater_than': return Number(strVal) > Number(cond.value)
+      case 'less_than':    return Number(strVal) < Number(cond.value)
+      case 'contains':     return strVal.includes(cond.value)
+      default:             return false
+    }
+  }
+
+  private checkEventCondition(cond: EventCondition): boolean {
+    const raw = this.state.variables[cond.variable]
+    const strVal = raw !== undefined ? String(raw) : ''
+    switch (cond.operator) {
+      case 'equals':       return strVal === cond.value
+      case 'not_equals':   return strVal !== cond.value
+      case 'greater_than': return Number(strVal) > Number(cond.value)
+      case 'less_than':    return Number(strVal) < Number(cond.value)
+      case 'contains':     return strVal.includes(cond.value)
+      default:             return false
+    }
+  }
+
+  private completeGoal(goal: Goal): void {
+    // Mark completed so it doesn't fire again this session
+    ;(goal as Goal & { completed: boolean }).completed = true
+
+    switch (goal.completionAction) {
+      case 'advance_stage': {
+        const stages = [...(this.project.stages ?? [])].sort((a, b) => a.order - b.order)
+        const idx = stages.findIndex((s) => s.id === this.state.currentStageId)
+        const next = stages[idx + 1]
+        if (next) {
+          this.state.currentStageId = next.id
+          for (const v of next.variables ?? []) {
+            const val = v.type === 'number' ? (Number(v.defaultValue) || 0)
+                      : v.type === 'boolean' ? (v.defaultValue === 'true')
+                      : v.defaultValue
+            this.state.variables[v.name] = val
+          }
+          if (next.startingSceneId) this.loadScene(next.startingSceneId, undefined, true)
+        }
+        break
+      }
+      case 'end_game':
+        this.state.dialogText = goal.completionValue || 'You completed the game!'
+        break
+      case 'show_dialog':
+        this.state.dialogText = goal.completionValue
+        break
+    }
+  }
+
   stop() {
     this.state.running = false
     this.canvas.removeEventListener('click', this.boundClick)
     this.canvas.removeEventListener('mousemove', this.boundMouseMove)
+    window.removeEventListener('keydown', this.boundKeyDown)
+    window.removeEventListener('keyup', this.boundKeyUp)
     if (this.frameId !== null) {
       cancelAnimationFrame(this.frameId)
       this.frameId = null
@@ -146,6 +300,9 @@ export class GameRuntime {
   reset() {
     this.stop()
     this.objectVisibility.clear()
+    this.removedObjects.clear()
+    this.activeCollisions.clear()
+    this.repeatCounts.clear()
     this.imageCache.clear()
     this.state = this.freshState()
     this.start()
@@ -160,6 +317,7 @@ export class GameRuntime {
     if (!this.state.visitedScenes.includes(sceneId)) {
       this.state.visitedScenes.push(sceneId)
     }
+    this.initStageForScene(sceneId)
 
     const scene = this.project.scenes.find((s) => s.id === sceneId)
     if (scene) {
@@ -293,7 +451,7 @@ export class GameRuntime {
     // Fire scene-level 'enter' events — skip hotspot-bound events (those fire via zone detection)
     const hotspotIds = new Set(scene?.objects.filter((o) => o.type === 'hotspot').map((o) => o.id) ?? [])
     this.project.events
-      .filter((e) => e.sceneId === sceneId && e.trigger === 'enter' && e.enabled && !hotspotIds.has(e.objectId))
+      .filter((e) => e.sceneId === sceneId && this.evTriggers(e).includes('enter') && e.enabled && !hotspotIds.has(e.objectId))
       .forEach((ev) => this.executeEvent(ev))
   }
 
@@ -308,8 +466,10 @@ export class GameRuntime {
       this.updateCharacter(dt)
       const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
       if (scene) {
+        this.updateArrowMovement(dt, scene)
         this.updateNpcs(dt, scene)
         this.checkHotspots(scene)
+        this.checkCollisions(scene)
         this.checkScaleZones(scene)
         this.checkSceneEdges(scene)
         this.checkTeleportZones(scene)
@@ -343,7 +503,7 @@ export class GameRuntime {
       const vis = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
         : obj.visible
-      if (!vis) continue
+      if (!vis || this.removedObjects.has(obj.id)) continue
 
       const inside =
         fx >= obj.x && fx <= obj.x + obj.width &&
@@ -354,15 +514,65 @@ export class GameRuntime {
       if (inside && !wasInside) {
         this.state.activeHotspots.add(obj.id)
         this.project.events
-          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'enter' && e.enabled)
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && this.evTriggers(e).includes('enter') && e.enabled)
           .forEach((ev) => this.executeEvent(ev))
       } else if (!inside && wasInside) {
         this.state.activeHotspots.delete(obj.id)
         this.project.events
-          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && e.trigger === 'exit' && e.enabled)
+          .filter((e) => e.sceneId === scene.id && e.objectId === obj.id && this.evTriggers(e).includes('exit') && e.enabled)
           .forEach((ev) => this.executeEvent(ev))
       }
     }
+  }
+
+  // ── Multi-trigger helper ──────────────────────────────────────────────────
+
+  private evTriggers(ev: EventTrigger): TriggerType[] {
+    return [ev.trigger, ...(ev.triggers ?? [])]
+  }
+
+  // ── Object visibility helper ──────────────────────────────────────────────
+
+  private isObjectVisible(obj: SceneObject): boolean {
+    if (this.removedObjects.has(obj.id)) return false
+    return this.objectVisibility.has(obj.id) ? this.objectVisibility.get(obj.id)! : obj.visible
+  }
+
+  // ── Collision detection ───────────────────────────────────────────────────
+
+  private checkCollisions(scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+
+    const scale = char.scale ?? 1
+    const hx = char.x
+    const hy = char.y
+    const hw = mc.width * scale
+    const hh = mc.height * scale
+
+    const sceneIdAtEntry = this.state.currentSceneId
+    const nowColliding = new Set<string>()
+
+    for (const obj of scene.objects) {
+      if (this.state.currentSceneId !== sceneIdAtEntry) break
+      if (!this.isObjectVisible(obj)) continue
+      const ns = this.state.npcStates.get(obj.id)
+      const ox = ns ? ns.x : obj.x
+      const oy = ns ? ns.y : obj.y
+      const overlaps =
+        hx < ox + obj.width && hx + hw > ox &&
+        hy < oy + obj.height && hy + hh > oy
+      if (!overlaps) continue
+      nowColliding.add(obj.id)
+      if (!this.activeCollisions.has(obj.id)) {
+        this.project.events
+          .filter((ev) => ev.sceneId === scene.id && ev.objectId === obj.id && this.evTriggers(ev).includes('collision') && ev.enabled)
+          .forEach((ev) => this.executeEvent(ev))
+      }
+    }
+    this.activeCollisions.forEach((id) => { if (!nowColliding.has(id)) this.activeCollisions.delete(id) })
+    nowColliding.forEach((id) => this.activeCollisions.add(id))
   }
 
   // ── Scale zone detection ──────────────────────────────────────────────────
@@ -437,17 +647,15 @@ export class GameRuntime {
     nomY: number,
     side: SceneExitSide,
   ): { x: number; y: number } {
-    const padX = Math.max(0, mc.width / 2 - 1)
-    const padY = Math.max(0, mc.height / 2 - 1)
     const zones = scene.blockedZones ?? []
 
     const overlaps = (x: number, y: number): boolean => {
       for (const z of zones) {
         if (
-          x - padX < z.x + z.width &&
-          x + mc.width + padX > z.x &&
-          y - padY < z.y + z.height &&
-          y + mc.height + padY > z.y
+          x < z.x + z.width &&
+          x + mc.width > z.x &&
+          y < z.y + z.height &&
+          y + mc.height > z.y
         ) return true
       }
       return false
@@ -637,12 +845,7 @@ export class GameRuntime {
         break
       }
       case 'set_variable': {
-        if (step.variable) {
-          const i = step.variable.indexOf('=')
-          if (i !== -1) {
-            this.state.variables[step.variable.slice(0, i).trim()] = step.variable.slice(i + 1).trim()
-          }
-        }
+        if (step.variable) this.applyVariableExpression(step.variable)
         this.advanceCinematicStep()
         break
       }
@@ -681,10 +884,7 @@ export class GameRuntime {
         break
       }
       case 'set_variable': {
-        const i = completionValue.indexOf('=')
-        if (i !== -1) {
-          this.state.variables[completionValue.slice(0, i).trim()] = completionValue.slice(i + 1).trim()
-        }
+        this.applyVariableExpression(completionValue)
         break
       }
       case 'return_to_game':
@@ -827,6 +1027,66 @@ export class GameRuntime {
     }
   }
 
+  // ── Arrow-key movement ────────────────────────────────────────────────────
+
+  private isBlockedAt(x: number, y: number, cw: number, ch: number, scene: Scene): boolean {
+    for (const z of (scene.blockedZones ?? [])) {
+      if (x < z.x + z.width && x + cw > z.x && y < z.y + z.height && y + ch > z.y) return true
+    }
+    return false
+  }
+
+  private updateArrowMovement(dt: number, scene: Scene) {
+    const char = this.state.character
+    const mc = this.project.mainCharacter
+    if (!char || !mc) return
+    if (this.state.dialogText || this.state.cinematic || this.state.miniGame || this.state.questLogOpen) return
+
+    const moveX = (this.activeKeys.has('ArrowRight') ? 1 : 0) - (this.activeKeys.has('ArrowLeft') ? 1 : 0)
+    const moveY = (this.activeKeys.has('ArrowDown') ? 1 : 0) - (this.activeKeys.has('ArrowUp') ? 1 : 0)
+    if (moveX === 0 && moveY === 0) return
+
+    // Cancel any in-progress click-to-move navigation
+    if (char.waypoints.length > 0) {
+      char.waypoints = []
+      char.waypointIndex = 0
+      char.moving = false
+    }
+
+    // Normalise diagonal movement so speed is consistent in all directions
+    const len = Math.sqrt(moveX * moveX + moveY * moveY)
+    const speed = CHAR_SPEED * char.speedMult
+    const dx = (moveX / len) * speed * dt / 1000
+    const dy = (moveY / len) * speed * dt / 1000
+
+    // Facing: dominant axis wins
+    if (Math.abs(moveX) >= Math.abs(moveY)) char.facing = moveX > 0 ? 'right' : 'left'
+    else char.facing = moveY > 0 ? 'down' : 'up'
+
+    const cw = mc.width * char.scale
+    const ch = mc.height * char.scale
+
+    // Slide along walls: test X and Y independently
+    const newX = Math.max(0, Math.min(scene.width - cw, char.x + dx))
+    if (!this.isBlockedAt(newX, char.y, cw, ch, scene)) char.x = newX
+
+    const newY = Math.max(0, Math.min(scene.height - ch, char.y + dy))
+    if (!this.isBlockedAt(char.x, newY, cw, ch, scene)) char.y = newY
+
+    // Keep animation running
+    char.moving = true
+    const animDef = this.getCharAnim(char.facing)
+    if (animDef && animDef.fps > 0) {
+      const frameMs = 1000 / animDef.fps
+      char.animTimer += dt
+      while (char.animTimer >= frameMs) {
+        char.animTimer -= frameMs
+        char.animFrame++
+        if (char.animFrame > animDef.endFrame) char.animFrame = animDef.startFrame
+      }
+    }
+  }
+
   // ── NPC autonomous movement ───────────────────────────────────────────────
 
   private updateNpcs(dt: number, scene: Scene) {
@@ -863,8 +1123,8 @@ export class GameRuntime {
         }
       }
       ns.scale = npcScale
-      const scaledNpcW = npc.width * npcScale
-      const scaledNpcH = npc.height * npcScale
+      const scaledNpcW = obj.width * npcScale
+      const scaledNpcH = obj.height * npcScale
 
       // ── Behavior decisions ────────────────────────────────────────────────────
       ns.behaviorTimer = Math.max(0, ns.behaviorTimer - dt)
@@ -1028,6 +1288,8 @@ export class GameRuntime {
 
     if (this.state.dialogText) this.renderDialog()
     if (this.state.cinematic?.actionText) this.renderActionLabel()
+    this.renderQuestHUDButton()
+    if (this.state.questLogOpen) this.renderQuestLog()
   }
 
   private renderTitleScreen() {
@@ -1116,7 +1378,7 @@ export class GameRuntime {
       const visible = this.objectVisibility.has(obj.id)
         ? this.objectVisibility.get(obj.id)!
         : obj.visible
-      if (!visible) continue
+      if (!visible || this.removedObjects.has(obj.id)) continue
 
       // Insert character draw before the first object whose z-index exceeds charDepth
       if (!charDrawn && charDepth !== null && obj.zIndex > charDepth) {
@@ -1300,28 +1562,172 @@ export class GameRuntime {
     ctx.textBaseline = 'top'
 
     const maxWidth = canvas.width - 16 - padding * 2
-    const words = (this.state.dialogText ?? '').split(' ')
-    let line = ''
-    let lineY = boxY + padding
     const lineHeight = fontSize + 6
+    let lineY = boxY + padding
 
-    for (const word of words) {
-      const test = line + word + ' '
-      if (ctx.measureText(test).width > maxWidth && line) {
-        ctx.fillText(line.trim(), 8 + padding, lineY)
-        line = word + ' '
-        lineY += lineHeight
-      } else {
-        line = test
+    const paragraphs = (this.state.dialogText ?? '').split('\n')
+    for (const para of paragraphs) {
+      const words = para.split(' ')
+      let line = ''
+      for (const word of words) {
+        const test = line + word + ' '
+        if (ctx.measureText(test).width > maxWidth && line) {
+          ctx.fillText(line.trim(), 8 + padding, lineY)
+          line = word + ' '
+          lineY += lineHeight
+        } else {
+          line = test
+        }
       }
+      if (line.trim()) { ctx.fillText(line.trim(), 8 + padding, lineY); lineY += lineHeight }
     }
-    if (line.trim()) ctx.fillText(line.trim(), 8 + padding, lineY)
 
     ctx.fillStyle = '#6366f1'
     ctx.font = `12px sans-serif`
     ctx.textAlign = 'right'
     ctx.textBaseline = 'bottom'
     ctx.fillText('▶ Click to continue', canvas.width - 16, boxY + boxH - 8)
+  }
+
+  private renderQuestHUDButton() {
+    if (this.state.showTitleScreen) return
+    const { ctx, canvas } = this
+    const w = 52, h = 28, x = canvas.width - w - 8, y = 8
+    this.questButtonRect = { x, y, w, h }
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'
+    ctx.strokeStyle = '#4f46e5'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.roundRect(x, y, w, h, 6)
+    ctx.fill()
+    ctx.stroke()
+    ctx.fillStyle = '#e2e8f0'
+    ctx.font = `bold ${Math.max(10, Math.min(12, canvas.width / 80))}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(`📜 ${this.state.activeQuestIds.length}`, x + w / 2, y + h / 2)
+  }
+
+  private renderQuestLog() {
+    const { ctx, canvas } = this
+    const panelW = Math.min(320, canvas.width * 0.85)
+    const panelH = Math.min(canvas.height * 0.78, 500)
+    const panelX = canvas.width - panelW - 8
+    const panelY = 44
+
+    ctx.fillStyle = 'rgba(15,15,30,0.96)'
+    ctx.strokeStyle = '#4f46e5'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.roundRect(panelX, panelY, panelW, panelH, 8)
+    ctx.fill()
+    ctx.stroke()
+
+    const fontSize = Math.max(11, Math.min(13, canvas.width / 70))
+    const lineH = fontSize + 6
+    const pad = 14
+
+    // Header
+    ctx.fillStyle = '#e2e8f0'
+    ctx.font = `bold ${fontSize + 2}px sans-serif`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText('Quest Log', panelX + pad, panelY + pad)
+
+    // Close button
+    const closeW = 22, closeH = 22
+    const closeX = panelX + panelW - closeW - 8
+    const closeY = panelY + 8
+    this.questLogCloseRect = { x: closeX, y: closeY, w: closeW, h: closeH }
+    ctx.fillStyle = '#374151'
+    ctx.beginPath()
+    ctx.roundRect(closeX, closeY, closeW, closeH, 4)
+    ctx.fill()
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = `bold ${fontSize}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('x', closeX + closeW / 2, closeY + closeH / 2)
+
+    const quests = this.project.quests ?? []
+    let curY = panelY + pad + fontSize + 4 + lineH
+
+    const wrapText = (text: string, x: number, maxW: number, startY: number): number => {
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      const words = text.split(' ')
+      let line = ''
+      let y = startY
+      for (const word of words) {
+        const test = line + word + ' '
+        if (ctx.measureText(test).width > maxW && line) {
+          ctx.fillText(line.trim(), x, y)
+          line = word + ' '
+          y += lineH
+        } else {
+          line = test
+        }
+      }
+      if (line.trim()) { ctx.fillText(line.trim(), x, y); y += lineH }
+      return y
+    }
+
+    // Active quests
+    const active = this.state.activeQuestIds.map((id) => quests.find((q) => q.id === id)).filter(Boolean) as typeof quests
+    if (active.length > 0) {
+      ctx.fillStyle = '#818cf8'
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText('Active', panelX + pad, curY)
+      curY += lineH + 2
+
+      for (const quest of active) {
+        if (curY > panelY + panelH - pad) break
+        ctx.fillStyle = '#e2e8f0'
+        ctx.font = `bold ${fontSize}px sans-serif`
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'top'
+        ctx.fillText(quest.name, panelX + pad, curY)
+        curY += lineH
+        ctx.fillStyle = '#94a3b8'
+        curY = wrapText(quest.description, panelX + pad, panelW - pad * 2, curY)
+        for (const obj of quest.objectives ?? []) {
+          if (curY > panelY + panelH - pad) break
+          ctx.fillStyle = '#6b7280'
+          ctx.fillText(`  o ${obj.text}`, panelX + pad + 4, curY)
+          curY += lineH
+        }
+        curY += 4
+      }
+    }
+
+    // Completed quests
+    const completed = this.state.completedQuestIds.map((id) => quests.find((q) => q.id === id)).filter(Boolean) as typeof quests
+    if (completed.length > 0 && curY < panelY + panelH - pad) {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText('Completed', panelX + pad, curY)
+      curY += lineH + 2
+      for (const quest of completed) {
+        if (curY > panelY + panelH - pad) break
+        ctx.fillStyle = '#4b5563'
+        ctx.font = `${fontSize}px sans-serif`
+        ctx.fillText(`✓ ${quest.name}`, panelX + pad, curY)
+        curY += lineH
+      }
+    }
+
+    if (active.length === 0 && completed.length === 0) {
+      ctx.fillStyle = '#6b7280'
+      ctx.font = `${fontSize}px sans-serif`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillText('No quests yet.', panelX + pad, curY)
+    }
   }
 
   // ── Input handling ────────────────────────────────────────────────────────
@@ -1360,6 +1766,28 @@ export class GameRuntime {
       return
     }
 
+    // Quest log close button
+    const rect2 = this.canvas.getBoundingClientRect()
+    const cx2 = (e.clientX - rect2.left) * (this.canvas.width / rect2.width)
+    const cy2 = (e.clientY - rect2.top) * (this.canvas.height / rect2.height)
+
+    if (this.state.questLogOpen) {
+      const cl = this.questLogCloseRect
+      if (cx2 >= cl.x && cx2 <= cl.x + cl.w && cy2 >= cl.y && cy2 <= cl.y + cl.h) {
+        this.state.questLogOpen = false
+        return
+      }
+      // Swallow all other clicks when log is open
+      return
+    }
+
+    // Quest HUD button
+    const qb = this.questButtonRect
+    if (cx2 >= qb.x && cx2 <= qb.x + qb.w && cy2 >= qb.y && cy2 <= qb.y + qb.h) {
+      this.state.questLogOpen = true
+      return
+    }
+
     const pos = this.getScenePos(e)
     const scene = this.project.scenes.find((s) => s.id === this.state.currentSceneId)
     if (!scene) return
@@ -1367,7 +1795,7 @@ export class GameRuntime {
     const obj = this.getObjectAt(scene, pos.x, pos.y)
     if (obj) {
       const events = this.project.events.filter(
-        (ev) => ev.sceneId === scene.id && ev.objectId === obj.id && ev.trigger === 'click' && ev.enabled
+        (ev) => ev.sceneId === scene.id && ev.objectId === obj.id && this.evTriggers(ev).includes('click') && ev.enabled
       )
       events.forEach((ev) => this.executeEvent(ev))
       return
@@ -1414,10 +1842,23 @@ export class GameRuntime {
     this.canvas.style.cursor = obj ? 'pointer' : 'default'
   }
 
+  private handleKeyDown(e: KeyboardEvent) {
+    if (this.state.showTitleScreen || this.state.miniGame) return
+    if (e.key === 'j' || e.key === 'J') {
+      this.state.questLogOpen = !this.state.questLogOpen
+    }
+    this.activeKeys.add(e.key)
+  }
+
+  private handleKeyUp(e: KeyboardEvent) {
+    this.activeKeys.delete(e.key)
+  }
+
   private getObjectAt(scene: Scene, x: number, y: number): SceneObject | null {
     return [...scene.objects]
       .filter((o) => {
         if (o.type === 'hotspot') return false   // hotspots don't intercept clicks or cursor
+        if (this.removedObjects.has(o.id)) return false
         const vis = this.objectVisibility.has(o.id) ? this.objectVisibility.get(o.id)! : o.visible
         return vis
       })
@@ -1428,6 +1869,15 @@ export class GameRuntime {
   // ── Event / action execution ──────────────────────────────────────────────
 
   private executeEvent(event: EventTrigger) {
+    for (const branch of (event.branches ?? [])) {
+      if (branch.conditions.length === 0) continue
+      const results = branch.conditions.map((c) => this.checkEventCondition(c))
+      const matched = branch.logic === 'AND' ? results.every(Boolean) : results.some(Boolean)
+      if (matched) {
+        branch.actions.forEach((a) => this.executeAction(a))
+        return
+      }
+    }
     event.actions.forEach((a) => this.executeAction(a))
   }
 
@@ -1449,12 +1899,8 @@ export class GameRuntime {
         this.state.dialogText = action.value
         break
       case 'set_variable': {
-        const eqIdx = action.value.indexOf('=')
-        if (eqIdx !== -1) {
-          const key = action.value.slice(0, eqIdx).trim()
-          const val = action.value.slice(eqIdx + 1).trim()
-          this.state.variables[key] = val
-        }
+        this.applyVariableExpression(action.value)
+        this.evaluateGoals()
         break
       }
       case 'show_object':
@@ -1463,6 +1909,29 @@ export class GameRuntime {
       case 'hide_object':
         this.objectVisibility.set(action.value, false)
         break
+      case 'remove_object':
+        this.removedObjects.add(action.value)
+        break
+      case 'spawn_object': {
+        let template: SceneObject | undefined
+        for (const s of this.project.scenes) {
+          template = s.objects.find((o) => o.id === action.value)
+          if (template) break
+        }
+        if (!template) break
+        const targetScene = this.project.scenes.find(
+          (s) => s.id === (action.spawnSceneId || this.state.currentSceneId)
+        )
+        if (!targetScene) break
+        targetScene.objects.push({
+          ...template,
+          id: `spawned-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          x: action.spawnX ?? template.x,
+          y: action.spawnY ?? template.y,
+          visible: true,
+        })
+        break
+      }
       case 'play_sound': {
         const asset = this.project.assets.find(
           (a) => a.id === action.value || a.name === action.value
@@ -1477,7 +1946,28 @@ export class GameRuntime {
         break
       }
       case 'launch_minigame': {
-        this.launchMiniGame(action.value)
+        this.launchMiniGame(action)
+        break
+      }
+      case 'trigger_event': {
+        const ev = this.project.events.find((e) => e.id === action.value)
+        if (ev) this.executeEvent(ev)
+        break
+      }
+      case 'add_quest': {
+        const quest = (this.project.quests ?? []).find((q) => q.id === action.value)
+        if (!quest) break
+        if (this.state.activeQuestIds.includes(quest.id) || this.state.completedQuestIds.includes(quest.id)) break
+        this.state.activeQuestIds = [...this.state.activeQuestIds, quest.id]
+        this.state.dialogText = `New Quest: ${quest.name}\n${quest.description}`
+        break
+      }
+      case 'complete_quest': {
+        if (!this.state.activeQuestIds.includes(action.value)) break
+        this.state.activeQuestIds = this.state.activeQuestIds.filter((id) => id !== action.value)
+        this.state.completedQuestIds = [...this.state.completedQuestIds, action.value]
+        const doneQuest = (this.project.quests ?? []).find((q) => q.id === action.value)
+        if (doneQuest) this.state.dialogText = `Quest Complete: ${doneQuest.name}`
         break
       }
     }
@@ -1504,11 +1994,34 @@ export class GameRuntime {
     return mod.default
   }
 
-  private async launchMiniGame(id: string) {
-    const mg = (this.project.miniGames ?? []).find((m) => m.id === id)
+  private async launchMiniGame(action: EventAction, isRepeat = false) {
+    const mg = (this.project.miniGames ?? []).find((m) => m.id === action.value)
     if (!mg?.source) return
 
+    if (!isRepeat) this.repeatCounts.delete(action.id)
+
     const returnSceneId = this.state.currentSceneId
+
+    // Snapshot all mutable runtime state before the mini-game takes over
+    const snapshot = {
+      variables:           { ...this.state.variables },
+      currentStageId:      this.state.currentStageId,
+      character:           this.state.character
+                             ? { ...this.state.character, waypoints: [...this.state.character.waypoints] }
+                             : null,
+      npcStates:           new Map(
+                             Array.from(this.state.npcStates.entries())
+                               .map(([k, v]) => [k, { ...v, waypoints: [...v.waypoints] }])
+                           ),
+      objectVisibility:    new Map(this.objectVisibility),
+      removedObjects:      new Set(this.removedObjects),
+      activeHotspots:      new Set(this.state.activeHotspots),
+      activeTeleportZones: new Set(this.state.activeTeleportZones),
+      visitedScenes:       [...this.state.visitedScenes],
+      activeQuestIds:      [...this.state.activeQuestIds],
+      completedQuestIds:   [...this.state.completedQuestIds],
+    }
+
     this.state.miniGame = { returnSceneId, instance: null }
 
     if (this.frameId !== null) {
@@ -1535,18 +2048,90 @@ export class GameRuntime {
         this.state.miniGame?.instance?.destroy()
         this.state.miniGame = null
         document.body.removeChild(overlay)
+
+        // Restore all snapshotted state — no loadScene, which would reset variables and NPCs
+        this.state.currentSceneId      = returnSceneId
+        this.state.currentStageId      = snapshot.currentStageId
+        this.state.variables           = { ...snapshot.variables }
+        this.state.character           = snapshot.character
+                                           ? { ...snapshot.character, waypoints: [...snapshot.character.waypoints] }
+                                           : null
+        this.state.npcStates           = new Map(
+                                           Array.from(snapshot.npcStates.entries())
+                                             .map(([k, v]) => [k, { ...v, waypoints: [...v.waypoints] }])
+                                         )
+        this.objectVisibility          = new Map(snapshot.objectVisibility)
+        this.removedObjects            = new Set(snapshot.removedObjects)
+        this.state.activeHotspots      = new Set(snapshot.activeHotspots)
+        this.state.activeTeleportZones = new Set(snapshot.activeTeleportZones)
+        this.state.visitedScenes       = [...snapshot.visitedScenes]
+        this.state.activeQuestIds      = [...snapshot.activeQuestIds]
+        this.state.completedQuestIds   = [...snapshot.completedQuestIds]
+        this.state.dialogText          = null
+        this.state.dialogCallback      = null
+
+        // Merge any variables returned by the mini-game on top of the restored state
         if (vars) Object.assign(this.state.variables, vars)
         this.state.variables['minigame_result'] = result
-        this.loadScene(returnSceneId, undefined, false)
+
+        // Execute result-specific post-game actions
+        const resultActions =
+          result === 'win'  ? (action.onWinActions  ?? []) :
+          result === 'lose' ? (action.onLoseActions ?? []) :
+                              (action.onExitActions ?? [])
+        resultActions.forEach((a) => this.executeAction(a))
+
+        // Repeat logic — skip if result actions already contain an async launch_minigame
+        const hasAsyncAction = resultActions.some((a) => a.type === 'launch_minigame')
+        const repeatMatches =
+          action.repeatOnResult === 'any' ||
+          action.repeatOnResult === result
+
+        if (repeatMatches && !hasAsyncAction) {
+          const count = this.repeatCounts.get(action.id) ?? 0
+          const maxRepeats = action.repeatMax ?? 0  // 0 = infinite
+          if (maxRepeats === 0 || count < maxRepeats) {
+            this.repeatCounts.set(action.id, count + 1)
+            this.launchMiniGame(action, true)
+            return
+          }
+          this.repeatCounts.delete(action.id)
+        }
+
         this.state.running = true
         this.lastFrameTime = 0
         this.renderLoop()
+      }
+
+      const spriteMap: Record<string, string> = {}
+      const spriteFrames: Record<string, { url: string; frameWidth: number; frameHeight: number; startFrame: number; endFrame: number; frameRate: number; loop: boolean }> = {}
+      for (const [slot, binding] of Object.entries(mg.spriteMap ?? {})) {
+        if (!binding?.sheetId) continue
+        const ss = this.project.spriteSheets?.find((s) => s.id === binding.sheetId)
+        if (!ss) continue
+        spriteMap[slot] = ss.imageUrl
+        if (binding.animId) {
+          const anim = ss.animations.find((a) => a.id === binding.animId)
+          if (anim) {
+            spriteFrames[slot] = {
+              url:         ss.imageUrl,
+              frameWidth:  ss.frameWidth,
+              frameHeight: ss.frameHeight,
+              startFrame:  anim.startFrame,
+              endFrame:    anim.endFrame,
+              frameRate:   anim.fps,
+              loop:        anim.loop,
+            }
+          }
+        }
       }
 
       const context = {
         canvas,
         Phaser: (window as any).Phaser,
         assets: this.project.assets.map((a) => ({ id: a.id, name: a.name, url: a.url, type: a.type })),
+        spriteMap,
+        spriteFrames,
         variables: { ...this.state.variables },
         onComplete: (result: 'win' | 'lose' | 'exit', updatedVars?: Record<string, string | number | boolean>) => {
           teardown(result, updatedVars)

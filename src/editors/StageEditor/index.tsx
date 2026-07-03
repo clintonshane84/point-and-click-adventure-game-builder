@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, Trash2, ChevronUp, ChevronDown, BookOpen } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
-import type { Stage } from '../../types'
+import type { Stage, StageVariable } from '../../types'
 
 export function StageEditor() {
   const { project, addStage, updateStage, deleteStage, reorderStages } = useGameStore()
@@ -51,6 +51,31 @@ export function StageEditor() {
       ? selectedStage.sceneIds.filter((id) => id !== sceneId)
       : [...selectedStage.sceneIds, sceneId]
     updateStage(selectedStage.id, { sceneIds })
+  }
+
+  const handleAddVariable = () => {
+    if (!selectedStage) return
+    const newVar: StageVariable = {
+      id: `var-${Date.now()}`,
+      name: `variable${(selectedStage.variables?.length ?? 0) + 1}`,
+      type: 'string',
+      defaultValue: '',
+    }
+    updateStage(selectedStage.id, { variables: [...(selectedStage.variables ?? []), newVar] })
+  }
+
+  const handleUpdateVariable = (varId: string, updates: Partial<StageVariable>) => {
+    if (!selectedStage) return
+    updateStage(selectedStage.id, {
+      variables: (selectedStage.variables ?? []).map((v) => v.id === varId ? { ...v, ...updates } : v),
+    })
+  }
+
+  const handleDeleteVariable = (varId: string) => {
+    if (!selectedStage) return
+    updateStage(selectedStage.id, {
+      variables: (selectedStage.variables ?? []).filter((v) => v.id !== varId),
+    })
   }
 
   return (
@@ -210,6 +235,80 @@ export function StageEditor() {
               <div className="pt-2 text-xs text-gray-400">
                 {selectedStage.sceneIds.length} scene{selectedStage.sceneIds.length !== 1 ? 's' : ''} assigned to this stage
               </div>
+            </section>
+
+            {/* Stage Variables */}
+            <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-gray-200 font-semibold">Stage Variables</h3>
+                  <p className="text-gray-400 text-xs mt-1">
+                    Variables initialised when this stage starts. Set them in events; check them in goals.
+                  </p>
+                </div>
+                <button
+                  onClick={handleAddVariable}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm"
+                >
+                  <Plus size={14} /> Add Variable
+                </button>
+              </div>
+
+              {(selectedStage.variables ?? []).length === 0 ? (
+                <p className="text-gray-500 text-sm">No variables defined. Add one to track game state for this stage.</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-12 gap-2 px-1 mb-1">
+                    <span className="col-span-4 text-xs text-gray-500 uppercase tracking-wide">Name</span>
+                    <span className="col-span-3 text-xs text-gray-500 uppercase tracking-wide">Type</span>
+                    <span className="col-span-4 text-xs text-gray-500 uppercase tracking-wide">Default Value</span>
+                  </div>
+                  {(selectedStage.variables ?? []).map((v) => (
+                    <div key={v.id} className="grid grid-cols-12 gap-2 items-center">
+                      <input
+                        type="text"
+                        value={v.name}
+                        onChange={(e) => handleUpdateVariable(v.id, { name: e.target.value })}
+                        placeholder="variableName"
+                        className="col-span-4 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                      <select
+                        value={v.type}
+                        onChange={(e) => handleUpdateVariable(v.id, { type: e.target.value as StageVariable['type'], defaultValue: '' })}
+                        className="col-span-3 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="string">string</option>
+                        <option value="number">number</option>
+                        <option value="boolean">boolean</option>
+                      </select>
+                      {v.type === 'boolean' ? (
+                        <select
+                          value={v.defaultValue}
+                          onChange={(e) => handleUpdateVariable(v.id, { defaultValue: e.target.value })}
+                          className="col-span-4 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="false">false</option>
+                          <option value="true">true</option>
+                        </select>
+                      ) : (
+                        <input
+                          type={v.type === 'number' ? 'number' : 'text'}
+                          value={v.defaultValue}
+                          onChange={(e) => handleUpdateVariable(v.id, { defaultValue: e.target.value })}
+                          placeholder={v.type === 'number' ? '0' : '""'}
+                          className="col-span-4 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono"
+                        />
+                      )}
+                      <button
+                        onClick={() => handleDeleteVariable(v.id)}
+                        className="col-span-1 flex justify-center text-gray-500 hover:text-red-400"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         ) : (

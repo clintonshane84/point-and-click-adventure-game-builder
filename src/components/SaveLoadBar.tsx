@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Save, FolderOpen, FolderCog, Clock,
-  CheckCircle2, AlertCircle, Loader2, RotateCcw, X,
+  CheckCircle2, AlertCircle, Loader2,
 } from 'lucide-react'
 import { useGameStore } from '../store/useGameStore'
 import {
   saveProject, loadProject,
-  autoSave, autoSaveToFile, getAutoSave, clearAutoSave,
+  autoSave, autoSaveToFile, getAutoSave,
   getSavedDirectoryName, changeProjectDirectory,
   fsaSupported,
 } from '../lib/fileSystemStorage'
@@ -22,16 +22,14 @@ function formatTime(iso: string): string {
 }
 
 export function SaveLoadBar() {
-  const project     = useGameStore((s) => s.project)
+  const project          = useGameStore((s) => s.project)
+  const fileOpen         = useGameStore((s) => s.fileOpen)
   const loadStoreProject = useGameStore((s) => s.loadProject)
+  const setFileOpen      = useGameStore((s) => s.setFileOpen)
 
-  const [status, setStatus]   = useState<OpStatus>({ type: 'idle' })
-  const [savedDir, setSavedDir] = useState<string | null>(null)
+  const [status, setStatus]         = useState<OpStatus>({ type: 'idle' })
+  const [savedDir, setSavedDir]     = useState<string | null>(null)
   const [lastAutoSave, setLastAutoSave] = useState<string | null>(null)
-  const [restoreData, setRestoreData]   = useState<{ project: ReturnType<typeof getAutoSave>; visible: boolean }>({
-    project: null,
-    visible: false,
-  })
 
   // Clear status automatically after 4 s
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -43,32 +41,29 @@ export function SaveLoadBar() {
     }
   }
 
-  // On mount: load saved directory name + check for auto-save to restore
+  // On mount: restore last session automatically if auto-save exists
   useEffect(() => {
     getSavedDirectoryName().then(setSavedDir)
 
     const saved = getAutoSave()
-    if (saved) {
-      // Only offer restore if the autosave is newer than the current project
-      const autoTs   = new Date(saved.savedAt).getTime()
-      const projectTs = new Date(project.updatedAt).getTime()
-      if (autoTs > projectTs) {
-        setRestoreData({ project: saved, visible: true })
-        setLastAutoSave(saved.savedAt)
-      }
+    if (saved?.project) {
+      loadStoreProject(saved.project)
+      setFileOpen(true)
+      setLastAutoSave(saved.savedAt)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Auto-save every 60 s — localStorage always, FSA file if permission is held
+  // Auto-save every 60 s — only while a file is open
   useEffect(() => {
+    if (!fileOpen) return
     const id = setInterval(() => {
       autoSave(project)
       autoSaveToFile(project)
       setLastAutoSave(new Date().toISOString())
     }, 60_000)
     return () => clearInterval(id)
-  }, [project])
+  }, [fileOpen, project])
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
@@ -79,20 +74,21 @@ export function SaveLoadBar() {
       showStatus({ type: 'err', msg: result.error })
       return
     }
-    // Persist dir name for label
-    if (result.method === 'fsa') {
+    // Update displayed folder name when saving to a directory
+    if (result.method === 'fsa-dir') {
       const dir = result.path.split('/')[0]
       setSavedDir(dir)
     }
+    setFileOpen(true)
     autoSave(project)
     setLastAutoSave(new Date().toISOString())
     showStatus({
       type: 'ok',
-      msg: result.method === 'fsa'
-        ? `Saved to ${result.path}`
-        : `Downloaded ${result.path}`,
+      msg: result.method === 'download'
+        ? `Downloaded ${result.path}`
+        : `Saved — ${result.path}`,
     })
-  }, [project])
+  }, [project, setFileOpen])
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const handleLoad = useCallback(async () => {
@@ -104,8 +100,9 @@ export function SaveLoadBar() {
       return
     }
     loadStoreProject(result.project)
+    setFileOpen(true)
     showStatus({ type: 'ok', msg: `Loaded "${result.project.name}"` })
-  }, [loadStoreProject])
+  }, [loadStoreProject, setFileOpen])
 
   // ── Change folder ─────────────────────────────────────────────────────────
   const handleChangeDir = useCallback(async () => {
@@ -116,47 +113,10 @@ export function SaveLoadBar() {
     }
   }, [])
 
-  // ── Restore auto-save ─────────────────────────────────────────────────────
-  function handleRestore() {
-    if (!restoreData.project) return
-    loadStoreProject(restoreData.project.project)
-    clearAutoSave()
-    setRestoreData({ project: null, visible: false })
-    showStatus({ type: 'ok', msg: 'Auto-save restored' })
-  }
-
-  function dismissRestore() {
-    clearAutoSave()
-    setRestoreData({ project: null, visible: false })
-  }
-
   const busy = status.type === 'busy'
 
   return (
     <>
-      {/* ── Auto-save recovery banner ─────────────────────────────────────── */}
-      {restoreData.visible && restoreData.project && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-amber-900/40 border-b border-amber-700/50 text-amber-200 text-xs shrink-0">
-          <RotateCcw size={13} className="shrink-0 text-amber-400" />
-          <span>
-            Auto-save found from <strong>{formatTime(restoreData.project.savedAt)}</strong>
-            {' '}— project: <strong>{restoreData.project.project.name}</strong>
-          </span>
-          <button
-            onClick={handleRestore}
-            className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium transition-colors"
-          >
-            Restore
-          </button>
-          <button
-            onClick={dismissRestore}
-            className="p-0.5 rounded hover:bg-amber-800/50 text-amber-400 hover:text-amber-200"
-            title="Dismiss"
-          >
-            <X size={13} />
-          </button>
-        </div>
-      )}
 
       {/* ── Main toolbar ─────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-4 py-2 bg-gray-950 border-b border-gray-800 shrink-0 min-h-[40px]">
@@ -222,8 +182,19 @@ export function SaveLoadBar() {
 
         <div className="flex-1" />
 
-        {/* Auto-save clock */}
-        {lastAutoSave && (
+        {/* No-file-open notice */}
+        {!fileOpen && (
+          <span className="text-xs text-amber-500">
+            No project loaded —{' '}
+            <button onClick={handleLoad} className="underline hover:text-amber-300">
+              load a file
+            </button>
+            {' '}or save to activate auto-save
+          </span>
+        )}
+
+        {/* Auto-save clock — only shown when a file is open */}
+        {fileOpen && lastAutoSave && (
           <span className="flex items-center gap-1 text-xs text-gray-600" title={`Auto-saved at ${lastAutoSave}`}>
             <Clock size={11} />
             Auto-saved {formatTime(lastAutoSave)}
