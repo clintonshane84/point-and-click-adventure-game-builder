@@ -7,6 +7,7 @@ export type EditorType =
   | 'sprite'
   | 'character'
   | 'cinematic'
+  | 'storyteller'
   | 'minigame'
   | 'settings'
   | 'titlescreen'
@@ -162,6 +163,7 @@ export type ActionType =
   | 'play_animation'
   | 'stop_animation'
   | 'play_cinematic'
+  | 'play_story'
   | 'launch_minigame'
   | 'trigger_event'
   | 'add_quest'
@@ -307,6 +309,10 @@ export interface GameSettings {
   startingSceneId: string
   saveSlotCount: number
   playerSettings: PlayerSetting[]
+  // Android (Expo) export. Optional so existing projects keep working; the generator fills in defaults.
+  androidPackageId?: string   // e.g. com.mycompany.mygame
+  versionCode?: number        // integer, increase for every store upload
+  orientation?: 'landscape' | 'portrait'
 }
 
 // Title screen types
@@ -345,6 +351,8 @@ export interface Stage {
   sceneIds: string[]
   description: string
   variables?: StageVariable[]
+  beforeStoryId?: string  // StoryBook played before the stage loads
+  afterStoryId?: string   // StoryBook played when the stage's goal completes
 }
 
 // Goal types
@@ -399,6 +407,9 @@ export interface MiniGame {
   description: string
   source: string        // full JS module source (ES module with default export)
   spriteMap?: Record<string, SpriteSlotBinding>  // slotName → { sheetId, animId }
+  // Keys shown as on-screen buttons on touch screens (e.g. ['A','S','D'] or ['ArrowLeft','Space']).
+  // Empty or missing = arrow keys and Space.
+  touchKeys?: string[]
 }
 
 // Cinematic types
@@ -440,6 +451,31 @@ export interface Cinematic {
   completionValue: string
 }
 
+// Story Teller types (book-style narration played before/after stages)
+export type StoryPaperStyle = 'parchment' | 'white' | 'dark'
+
+export interface StoryPage {
+  id: string
+  text: string
+  imageAssetId?: string   // image asset shown on the page
+  audioAssetId?: string   // optional narration audio; overrides text-to-speech
+  voiceName?: string      // speechSynthesis voice name
+  rate?: number           // speech rate (0.5–2)
+  pitch?: number          // speech pitch (0–2)
+}
+
+export interface StoryBook {
+  id: string
+  name: string
+  description: string
+  pages: StoryPage[]
+  paperStyle: StoryPaperStyle
+  fontSize: number        // px
+  autoRead: boolean       // read each page aloud when it is shown
+  autoAdvance: boolean    // turn to next page when narration finishes
+  playAtGameStart?: boolean  // plays before the title menu when the game starts (single-page books only; one book at most)
+}
+
 // Quest types
 export interface QuestObjective {
   id: string
@@ -468,6 +504,7 @@ export interface GameProject {
   mainCharacter: MainCharacter
   npcs: NpcCharacter[]
   cinematics: Cinematic[]
+  storyBooks: StoryBook[]
   settings: GameSettings
   titleScreen: TitleScreenConfig
   stages: Stage[]

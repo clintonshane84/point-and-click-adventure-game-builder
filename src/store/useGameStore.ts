@@ -22,6 +22,8 @@ import type {
   NpcCharacter,
   Cinematic,
   CinematicStep,
+  StoryBook,
+  StoryPage,
   CharacterAnimation,
   FacingDirection,
   CharacterPlacement,
@@ -49,6 +51,20 @@ const defaultStage: Stage = {
   startingSceneId: 'scene-1',
   sceneIds: ['scene-1'],
   description: '',
+}
+
+/**
+ * Keeps the game-start flag valid: at most one book, and only on a book with exactly one page.
+ * Applied when a project is loaded, so files saved in any state load consistently.
+ */
+function normalizeGameStart(books: StoryBook[]): StoryBook[] {
+  let claimed = false
+  return books.map((b) => {
+    const on = !!b.playAtGameStart && !claimed && b.pages.length === 1
+    if (on) claimed = true
+    if (on === !!b.playAtGameStart) return b
+    return { ...b, playAtGameStart: on }
+  })
 }
 
 const defaultSettings: GameSettings = {
@@ -112,6 +128,7 @@ const defaultProject: GameProject = {
   mainCharacter: defaultMainCharacter,
   npcs: [],
   cinematics: [],
+  storyBooks: [],
   settings: defaultSettings,
   titleScreen: defaultTitleScreen,
   stages: [defaultStage],
@@ -206,6 +223,15 @@ interface GameStore {
   deleteCinematicStep: (cinematicId: string, stepId: string) => void
   moveCinematicStep: (cinematicId: string, stepId: string, direction: 'up' | 'down') => void
 
+  // Story Teller actions
+  addStoryBook: (book: StoryBook) => void
+  updateStoryBook: (id: string, updates: Partial<StoryBook>) => void
+  deleteStoryBook: (id: string) => void
+  addStoryPage: (bookId: string, page: StoryPage) => void
+  updateStoryPage: (bookId: string, pageId: string, updates: Partial<StoryPage>) => void
+  deleteStoryPage: (bookId: string, pageId: string) => void
+  moveStoryPage: (bookId: string, pageId: string, direction: 'up' | 'down') => void
+
   // Blocked zone (pathfinding) actions
   addBlockedZone: (sceneId: string, zone: BlockedZone) => void
   updateBlockedZone: (sceneId: string, zoneId: string, updates: Partial<BlockedZone>) => void
@@ -256,6 +282,7 @@ export const useGameStore = create<GameStore>((set) => ({
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
         npcs: project.npcs ?? [],
         cinematics: project.cinematics ?? [],
+        storyBooks: normalizeGameStart(project.storyBooks ?? []),
         miniGames: project.miniGames ?? [],
         updatedAt: new Date().toISOString(),
       },
@@ -978,6 +1005,109 @@ export const useGameStore = create<GameStore>((set) => ({
           if (target < 0 || target >= steps.length) return c
           ;[steps[idx], steps[target]] = [steps[target], steps[idx]]
           return { ...c, steps }
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Story Teller actions
+  addStoryBook: (book) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: [...(state.project.storyBooks ?? []), book],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateStoryBook: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id === id) {
+            const next = { ...b, ...updates }
+            // Game start needs a single-page book
+            if (updates.playAtGameStart) next.playAtGameStart = b.pages.length === 1
+            return next
+          }
+          // Only one book can play at game start
+          const turningOn = updates.playAtGameStart && (state.project.storyBooks ?? []).find((x) => x.id === id)?.pages.length === 1
+          return turningOn ? { ...b, playAtGameStart: false } : b
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteStoryBook: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).filter((b) => b.id !== id),
+        // Clear stage hooks that pointed at the deleted book
+        stages: state.project.stages.map((s) => ({
+          ...s,
+          beforeStoryId: s.beforeStoryId === id ? undefined : s.beforeStoryId,
+          afterStoryId: s.afterStoryId === id ? undefined : s.afterStoryId,
+        })),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addStoryPage: (bookId, page) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id !== bookId) return b
+          const pages = [...b.pages, page]
+          // A game-start book must stay single-page
+          return { ...b, pages, playAtGameStart: pages.length === 1 ? b.playAtGameStart : false }
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateStoryPage: (bookId, pageId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) =>
+          b.id === bookId
+            ? { ...b, pages: b.pages.map((p) => (p.id === pageId ? { ...p, ...updates } : p)) }
+            : b
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteStoryPage: (bookId, pageId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id !== bookId) return b
+          const pages = b.pages.filter((p) => p.id !== pageId)
+          // A game-start book must stay single-page
+          return { ...b, pages, playAtGameStart: pages.length === 1 ? b.playAtGameStart : false }
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  moveStoryPage: (bookId, pageId, direction) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id !== bookId) return b
+          const pages = [...b.pages]
+          const idx = pages.findIndex((p) => p.id === pageId)
+          if (idx < 0) return b
+          const target = direction === 'up' ? idx - 1 : idx + 1
+          if (target < 0 || target >= pages.length) return b
+          ;[pages[idx], pages[target]] = [pages[target], pages[idx]]
+          return { ...b, pages }
         }),
         updatedAt: new Date().toISOString(),
       },

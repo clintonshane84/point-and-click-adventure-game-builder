@@ -59,14 +59,26 @@ function stringPull(startX,startY,portals){
   return result;
 }
 
-function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY, charWidth=0, charHeight=0) {
+// True when a character would stand in a blocked zone. Only the feet count: the bottom edge, across the full
+// width. The head may overlap a zone above it. Standing exactly on an edge is allowed. fromFeetY sweeps the
+// feet line from the previous position, so a step cannot skip a thin zone.
+function feetBlocked(zones, x, width, feetY, fromFeetY) {
+  const from = (fromFeetY===undefined) ? feetY : fromFeetY;
+  const lo=Math.min(feetY, from), hi=Math.max(feetY, from);
+  for (const z of zones) {
+    if (x<z.x+z.width && x+width>z.x && hi>z.y && lo<z.y+z.height) return true;
+  }
+  return false;
+}
+
+function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY, charWidth=0, _charHeight=0, feetOffset=0) {
   const cols = Math.ceil(sceneWidth / GRID_CELL);
   const rows = Math.ceil(sceneHeight / GRID_CELL);
-  const halfW=charWidth/2, halfH=charHeight/2;
+  const halfW=charWidth/2;
   const walkable = Array.from({length: rows}, () => new Array(cols).fill(true));
   for (const z of blockedZones) {
     const c0=Math.max(0,Math.round((z.x-halfW)/GRID_CELL)), c1=Math.min(cols,Math.round((z.x+z.width+halfW)/GRID_CELL));
-    const r0=Math.max(0,Math.round((z.y-halfH)/GRID_CELL)), r1=Math.min(rows,Math.round((z.y+z.height+halfH)/GRID_CELL));
+    const r0=Math.max(0,Math.round((z.y-feetOffset)/GRID_CELL)), r1=Math.min(rows,Math.max(r0+1,Math.round((z.y+z.height-feetOffset)/GRID_CELL)));
     for (let r=r0;r<r1;r++) for (let c=c0;c<c1;c++) walkable[r][c]=false;
   }
   const cc=(c)=>Math.max(0,Math.min(cols-1,c)), cr=(r)=>Math.max(0,Math.min(rows-1,r));
@@ -80,7 +92,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
     for(let step=steps;step>=1;step--){
       const r=Math.round(sR+dr*(step/steps)),c=Math.round(sC+dc*(step/steps));
       if(r<0||r>=rows||c<0||c>=cols) continue;
-      if(walkable[r][c]){eR=r;eC=c;found=true;{const gx=c*GRID_CELL+GRID_CELL/2,gy=r*GRID_CELL+GRID_CELL/2;let bx=gx,by=gy;if(dc>0){let m=Infinity;for(const z of blockedZones){const b=z.x-halfW;if(b>gx&&b<=(c+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))bx=m-0.5;}else if(dc<0){let m=-Infinity;for(const z of blockedZones){const b=z.x+z.width+halfW;if(b<gx&&b>=c*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))bx=m+0.5;}if(dr>0){let m=Infinity;for(const z of blockedZones){const b=z.y-halfH;if(b>gy&&b<=(r+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))by=m-0.5;}else if(dr<0){let m=-Infinity;for(const z of blockedZones){const b=z.y+z.height+halfH;if(b<gy&&b>=r*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))by=m+0.5;}effToX=bx;effToY=by;}break;}
+      if(walkable[r][c]){eR=r;eC=c;found=true;{const gx=c*GRID_CELL+GRID_CELL/2,gy=r*GRID_CELL+GRID_CELL/2;let bx=gx,by=gy;if(dc>0){let m=Infinity;for(const z of blockedZones){const b=z.x-halfW;if(b>gx&&b<=(c+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))bx=m-0.5;}else if(dc<0){let m=-Infinity;for(const z of blockedZones){const b=z.x+z.width+halfW;if(b<gx&&b>=c*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))bx=m+0.5;}if(dr>0){let m=Infinity;for(const z of blockedZones){const b=z.y-feetOffset;if(b>gy&&b<=(r+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))by=m-0.5;}else if(dr<0){let m=-Infinity;for(const z of blockedZones){const b=z.y+z.height-feetOffset;if(b<gy&&b>=r*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))by=m+0.5;}effToX=bx;effToY=by;}break;}
     }
     if(!found){
       let best=Infinity;
@@ -120,7 +132,7 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
       if(!walkable[r][c]) continue;
       if(r===sR&&c===sC) break;
       const nd=allNodes.get(key(r,c));
-      if(nd&&closed.has(key(r,c))){endNode=nd;{const gx=c*GRID_CELL+GRID_CELL/2,gy=r*GRID_CELL+GRID_CELL/2;let bx=gx,by=gy;if(dc>0){let m=Infinity;for(const z of blockedZones){const b=z.x-halfW;if(b>gx&&b<=(c+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))bx=m-0.5;}else if(dc<0){let m=-Infinity;for(const z of blockedZones){const b=z.x+z.width+halfW;if(b<gx&&b>=c*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))bx=m+0.5;}if(dr>0){let m=Infinity;for(const z of blockedZones){const b=z.y-halfH;if(b>gy&&b<=(r+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))by=m-0.5;}else if(dr<0){let m=-Infinity;for(const z of blockedZones){const b=z.y+z.height+halfH;if(b<gy&&b>=r*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))by=m+0.5;}effToX=bx;effToY=by;}break;}
+      if(nd&&closed.has(key(r,c))){endNode=nd;{const gx=c*GRID_CELL+GRID_CELL/2,gy=r*GRID_CELL+GRID_CELL/2;let bx=gx,by=gy;if(dc>0){let m=Infinity;for(const z of blockedZones){const b=z.x-halfW;if(b>gx&&b<=(c+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))bx=m-0.5;}else if(dc<0){let m=-Infinity;for(const z of blockedZones){const b=z.x+z.width+halfW;if(b<gx&&b>=c*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))bx=m+0.5;}if(dr>0){let m=Infinity;for(const z of blockedZones){const b=z.y-feetOffset;if(b>gy&&b<=(r+1)*GRID_CELL)m=Math.min(m,b);}if(isFinite(m))by=m-0.5;}else if(dr<0){let m=-Infinity;for(const z of blockedZones){const b=z.y+z.height-feetOffset;if(b<gy&&b>=r*GRID_CELL)m=Math.max(m,b);}if(isFinite(m))by=m+0.5;}effToX=bx;effToY=by;}break;}
     }
     if(!endNode) return [];
   }
@@ -133,11 +145,112 @@ function findPath(blockedZones, sceneWidth, sceneHeight, fromX, fromY, toX, toY,
 
 const CHAR_SPEED = 250;
 
+// Smallest comfortable tap target, in CSS pixels.
+const TAP_MIN_CSS_PX = 44;
+
+// Keys a mini-game uses when its touchKeys list is empty.
+const _TOUCH_KEY_DEFAULT=['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '];
+const _TOUCH_KEY_LABEL={ArrowLeft:'\u25C0', ArrowRight:'\u25B6', ArrowUp:'\u25B2', ArrowDown:'\u25BC', ' ':'Space', Enter:'Enter', Escape:'Esc'};
+const _TOUCH_KEY_CODE={ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, ' ':32, Enter:13, Escape:27};
+
+// Turns what the author typed ("space", "a") into KeyboardEvent.key values.
+function _normaliseTouchKey(raw){
+  const k=String(raw).trim();
+  if(/^space$/i.test(k)) return ' ';
+  if(k.length===1) return k.toUpperCase();
+  return k;
+}
+
+// Sends a key to the page the way a keyboard would. Phaser matches keys by keyCode, which the
+// KeyboardEvent constructor cannot set, so it is added as a property.
+function _sendGameKey(type, key){
+  const code=_TOUCH_KEY_CODE[key] || (key.length===1 ? key.toUpperCase().charCodeAt(0) : 0);
+  const ev=new KeyboardEvent(type, {key:key, code:(key===' ' ? 'Space' : key.length===1 ? 'Key'+key : key), bubbles:true});
+  Object.defineProperty(ev,'keyCode',{get:()=>code});
+  Object.defineProperty(ev,'which',{get:()=>code});
+  window.dispatchEvent(ev);
+}
+
+// Bottom bar of key buttons for a mini-game overlay. Holding a button holds the key.
+function _buildTouchKeyBar(touchKeys, overlay){
+  const keys=(touchKeys && touchKeys.length>0 ? touchKeys : _TOUCH_KEY_DEFAULT).map(_normaliseTouchKey);
+  const bar=document.createElement('div');
+  bar.style.cssText='position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:8px;background:rgba(0,0,0,0.7);z-index:1;';
+  for(const key of keys){
+    const b=document.createElement('button');
+    b.textContent=_TOUCH_KEY_LABEL[key] || key;
+    b.style.cssText='min-width:56px;min-height:48px;padding:0 12px;border-radius:8px;border:2px solid #c7d2fe;background:rgba(255,255,255,0.12);color:#fff;font:600 16px sans-serif;touch-action:none;user-select:none;';
+    const press=(e)=>{ e.preventDefault(); b.style.background='rgba(99,102,241,0.85)'; _sendGameKey('keydown', key); };
+    const release=(e)=>{ e.preventDefault(); b.style.background='rgba(255,255,255,0.12)'; _sendGameKey('keyup', key); };
+    b.addEventListener('pointerdown', press);
+    b.addEventListener('pointerup', release);
+    b.addEventListener('pointercancel', release);
+    bar.appendChild(b);
+  }
+  overlay.appendChild(bar);
+}
+
+// True when running inside the Expo app's WebView (the bridge is injected by react-native-webview).
+function _hasNativeSpeech(){
+  return typeof window!=='undefined' && !!window.ReactNativeWebView;
+}
+
+function _postToApp(msg){
+  if(window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+}
+
+// Logical size of each game canvas, kept so the engine can be rebuilt on the same element.
+const _LOGICAL_SIZE=new WeakMap();
+
+// Bitmap scale for the game canvas: the device pixel ratio, capped to keep memory and the WebView's
+// texture limit in check. ?dpr=N overrides it (for testing in a desktop browser).
+function _bitmapDpr(lw,lh){
+  let d=(typeof window!=='undefined' && window.devicePixelRatio) || 1;
+  try {
+    const forced=typeof location!=='undefined' ? new URLSearchParams(location.search).get('dpr') : null;
+    if(forced && Number(forced)>0) d=Number(forced);
+  } catch(err) {}
+  d=Math.min(Math.max(d,1), 3, 4096/Math.max(lw,lh));
+  while(d>1 && lw*lh*d*d>8000000) d=Math.max(1, d-0.25);
+  return d;
+}
+
+// Touch screens get the on-screen pad and larger buttons. ?touch forces it for testing in a desktop browser.
+function _isTouchDevice(){
+  try { if(typeof location!=='undefined' && new URLSearchParams(location.search).has('touch')) return true; } catch(err) {}
+  return typeof navigator!=='undefined' && navigator.maxTouchPoints>0;
+}
+
+// Canvas2D roundRect for older Android WebViews that lack it.
+if(typeof CanvasRenderingContext2D!=='undefined' && !CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    const rad=typeof r==='number' ? r : (Array.isArray(r) ? (r[0]||0) : 0);
+    this.moveTo(x+rad,y); this.lineTo(x+w-rad,y); this.arcTo(x+w,y,x+w,y+rad,rad);
+    this.lineTo(x+w,y+h-rad); this.arcTo(x+w,y+h,x+w-rad,y+h,rad);
+    this.lineTo(x+rad,y+h); this.arcTo(x,y+h,x,y+h-rad,rad);
+    this.lineTo(x,y+rad); this.arcTo(x,y,x+rad,y,rad); this.closePath();
+  };
+}
+
 export class GameEngine {
   constructor(canvas, project) {
     this.canvas = canvas;
     this.canvas.draggable = false;
     this.ctx = canvas.getContext('2d');
+    // The game's logical (CSS-pixel) size stays the same; the bitmap is larger on high-density screens
+    // so text and sprites stay sharp. Every layout and hit test uses lw/lh.
+    const known=_LOGICAL_SIZE.get(canvas);
+    this.lw=(known && canvas.width===known.pw) ? known.w : canvas.width;
+    this.lh=(known && canvas.height===known.ph) ? known.h : canvas.height;
+    const d=_bitmapDpr(this.lw,this.lh);
+    canvas.width=Math.round(this.lw*d);
+    canvas.height=Math.round(this.lh*d);
+    _LOGICAL_SIZE.set(canvas,{w:this.lw, h:this.lh, pw:canvas.width, ph:canvas.height});
+    this.sx=canvas.width/this.lw;
+    this.sy=canvas.height/this.lh;
+    canvas.style.width=this.lw+'px';
+    canvas.style.height=this.lh+'px';
+    this.ctx.setTransform(this.sx,0,0,this.sy,0,0);
     this.project = project;
     this.imageCache = new Map();
     this.objectVisibility = new Map();
@@ -152,9 +265,29 @@ export class GameEngine {
     this.state = this._freshState();
     this._boundClick = this._handleClick.bind(this);
     this._boundMove = this._handleMouseMove.bind(this);
+    this._boundDown = this._handleMouseDown.bind(this);
+    this._boundUp = this._handleMouseUp.bind(this);
+    this._boundPointerDown = this._handlePointerDown.bind(this);
+    this._boundPointerUp = this._handlePointerUp.bind(this);
+    this._boundPointerMove = this._handlePointerMove.bind(this);
+    // The native app (Expo) calls this when a line of narration finishes
+    window.__agbSpeechDone = (id) => this._onNarrationDone(id);
+    this._boundContextMenu = (e) => e.preventDefault();
+    this.touch = _isTouchDevice();
+    this.dpadRects = {ArrowUp:{x:0,y:0,w:0,h:0}, ArrowDown:{x:0,y:0,w:0,h:0}, ArrowLeft:{x:0,y:0,w:0,h:0}, ArrowRight:{x:0,y:0,w:0,h:0}};
+    this.dpadPointers = new Map();
+    // Stop the browser scrolling or zooming when the player drags across the game
+    this.canvas.style.touchAction = 'none';
+    this._cursorHover = false;
+    this._pointerDown = false;
     this._boundKeyDown = this._handleKeyDown.bind(this);
     this._boundKeyUp = this._handleKeyUp.bind(this);
     this.activeKeys = new Set();
+    this.pendingStories = [];
+    this.spawnTemplateIds = new Map();
+    this.saveButtonRect = {x:0,y:0,w:0,h:0};
+    this.saveMenuRects = {tabSave:{x:0,y:0,w:0,h:0}, tabLoad:{x:0,y:0,w:0,h:0}, back:{x:0,y:0,w:0,h:0}, slots:[]};
+    this.storyRects = {page:{x:0,y:0,w:0,h:0},speaker:{x:0,y:0,w:0,h:0},skip:{x:0,y:0,w:0,h:0}};
   }
 
   _freshState() {
@@ -172,6 +305,8 @@ export class GameEngine {
       activeHotspots: new Set(),
       activeTeleportZones: new Set(),
       cinematic: null,
+      story: null,
+      saveMenu: null,
       npcStates: new Map(),
       showTitleScreen: hasTitleScreen,
       miniGame: null,
@@ -187,16 +322,29 @@ export class GameEngine {
     this.lastFrameTime = 0;
     this.canvas.addEventListener('click', this._boundClick);
     this.canvas.addEventListener('mousemove', this._boundMove);
+    this.canvas.addEventListener('mousedown', this._boundDown);
+    window.addEventListener('mouseup', this._boundUp);
+    this.canvas.addEventListener('pointerdown', this._boundPointerDown);
+    window.addEventListener('pointerup', this._boundPointerUp);
+    window.addEventListener('pointercancel', this._boundPointerUp);
+    window.addEventListener('pointermove', this._boundPointerMove);
+    this.canvas.addEventListener('contextmenu', this._boundContextMenu);
+    this._applyCursor(false);
     window.addEventListener('keydown', this._boundKeyDown);
     window.addEventListener('keyup', this._boundKeyUp);
     const gameStartEvs=(this.project.events||[]).filter(e=>this._evTriggers(e).includes('game_start')&&e.enabled);
     gameStartEvs.forEach(e=>this._execEvent(e));
     this._initStageForScene(this.state.currentSceneId);
+    const intro=this._gameStartBook();
     if(this.state.showTitleScreen){
       const ts=this.project.titleScreen;
       if(ts?.backgroundImageUrl) this._loadImage(ts.backgroundImageUrl);
+      // The game-start book plays first; the title menu appears when it closes
+      if(intro) this.playStory(intro.id, {kind:'none'});
+    } else if(intro){
+      this.playStory(intro.id, {kind:'beforeStage'});
     } else {
-      this._loadScene(this.state.currentSceneId,undefined,true);
+      this._runContinuation({kind:'beforeStage'});
     }
     this._loop();
   }
@@ -250,6 +398,11 @@ export class GameEngine {
 
   _completeGoal(goal) {
     goal.completed=true;
+    // The finishing stage's "after" story plays first, then the goal's action applies
+    this._playStoryThen(this._currentStage()?.afterStoryId, {kind:'goalAction', goalId:goal.id});
+  }
+
+  _applyGoalAction(goal) {
     switch(goal.completionAction){
       case 'advance_stage':{
         const stages=[...(this.project.stages||[])].sort((a,b)=>a.order-b.order);
@@ -261,7 +414,8 @@ export class GameEngine {
             const val=v.type==='number'?(Number(v.defaultValue)||0):v.type==='boolean'?(v.defaultValue==='true'):v.defaultValue;
             this.state.variables[v.name]=val;
           }
-          if(next.startingSceneId) this._loadScene(next.startingSceneId,undefined,true);
+          // The next stage's "before" story plays before its starting scene loads
+          this._playStoryThen(next.beforeStoryId, next.startingSceneId ? {kind:'loadScene', sceneId:next.startingSceneId} : {kind:'none'});
         }
         break;
       }
@@ -275,9 +429,18 @@ export class GameEngine {
   }
 
   stop() {
+    this._stopNarration();
     this.state.running = false;
     this.canvas.removeEventListener('click', this._boundClick);
     this.canvas.removeEventListener('mousemove', this._boundMove);
+    this.canvas.removeEventListener('mousedown', this._boundDown);
+    window.removeEventListener('mouseup', this._boundUp);
+    this.canvas.removeEventListener('pointerdown', this._boundPointerDown);
+    window.removeEventListener('pointerup', this._boundPointerUp);
+    window.removeEventListener('pointercancel', this._boundPointerUp);
+    window.removeEventListener('pointermove', this._boundPointerMove);
+    this.canvas.removeEventListener('contextmenu', this._boundContextMenu);
+    this.dpadPointers.clear();
     window.removeEventListener('keydown', this._boundKeyDown);
     window.removeEventListener('keyup', this._boundKeyUp);
     if (this.frameId !== null) { cancelAnimationFrame(this.frameId); this.frameId = null; }
@@ -290,6 +453,8 @@ export class GameEngine {
     this.activeCollisions.clear();
     this.repeatCounts.clear();
     this.imageCache.clear();
+    this.pendingStories = [];
+    this.spawnTemplateIds = new Map();
     this.state = this._freshState();
     this.start();
   }
@@ -300,6 +465,12 @@ export class GameEngine {
     this.state.activeTeleportZones = new Set();
     if (!this.state.visitedScenes.includes(sceneId)) this.state.visitedScenes.push(sceneId);
     this._initStageForScene(sceneId);
+    this._buildSceneState(sceneId, entryOverride, stageStart);
+    this._fireSceneEnterEvents(sceneId);
+  }
+
+  // Builds visuals, hero and NPC state. Fires no events, so save loading can use it too.
+  _buildSceneState(sceneId, entryOverride, stageStart=false) {
     const scene = this.project.scenes.find(s => s.id === sceneId);
     if (scene) {
       if (scene.backgroundImageUrl) this._loadImage(scene.backgroundImageUrl);
@@ -356,10 +527,720 @@ export class GameEngine {
       });
       this.state.npcStates=npcStateMap;
     }
+  }
+
+  _fireSceneEnterEvents(sceneId) {
+    const scene=this.project.scenes.find(s=>s.id===sceneId);
     const hotspotIds=new Set(scene?.objects.filter(o=>o.type==='hotspot').map(o=>o.id)??[]);
     this.project.events
       .filter(e=>e.sceneId===sceneId&&this._evTriggers(e).includes('enter')&&e.enabled&&!hotspotIds.has(e.objectId))
       .forEach(ev=>this._execEvent(ev));
+  }
+
+  // ── Story Teller (book-style narration with page flips) ───────────────────
+
+  // The single-page book flagged to play as the game starts (before the title menu), if any.
+  _gameStartBook() {
+    return (this.project.storyBooks||[]).find(b=>b.playAtGameStart && b.pages.length===1);
+  }
+
+  _currentStage() {
+    return (this.project.stages||[]).find(s=>s.id===this.state.currentStageId);
+  }
+
+  _assetUrl(assetId) {
+    if(!assetId) return undefined;
+    const a=(this.project.assets||[]).find(a=>a.id===assetId||a.name===assetId);
+    return (a&&a.url)||undefined;
+  }
+
+  // Plays a story book if one is set, then runs the continuation. Runs it immediately when there is no story.
+  _playStoryThen(storyId, continuation) {
+    if(!storyId){ this._runContinuation(continuation); return; }
+    this.playStory(storyId, continuation);
+  }
+
+  // Opens a story book full-screen. If another story is open, it is queued and played afterwards.
+  playStory(storyId, continuation) {
+    const cont=continuation||{kind:'none'};
+    const book=(this.project.storyBooks||[]).find(b=>b.id===storyId);
+    if(!book||book.pages.length===0){ this._runContinuation(cont); return; }
+    if(this.state.story){ this.pendingStories.push({book, continuation:cont}); return; }
+    this._beginStory(book, cont);
+  }
+
+  // What happens after a story closes. Plain data, so it can be saved.
+  _runContinuation(c) {
+    if(c.kind==='loadScene'){ this._loadScene(c.sceneId,undefined,true); }
+    else if(c.kind==='beforeStage'){ this._playStoryThen(this._currentStage()?.beforeStoryId, {kind:'loadScene', sceneId:this.state.currentSceneId}); }
+    else if(c.kind==='goalAction'){
+      const goal=(this.project.goals||[]).find(g=>g.id===c.goalId);
+      if(goal) this._applyGoalAction(goal);
+    }
+  }
+
+  _beginStory(book, continuation, pageIndex) {
+    const pi=Math.min(Math.max(0, pageIndex||0), book.pages.length-1);
+    this.state.story={
+      book, pageIndex:pi, flip:null, continuation:continuation,
+      token:0, narrating:false, audio:null, timer:null,
+    };
+    this.activeKeys.clear();
+    for(const p of book.pages){
+      const url=this._assetUrl(p.imageAssetId);
+      if(url) this._loadImage(url);
+    }
+    this._startPageNarration(false);
+  }
+
+  _endStory() {
+    const s=this.state.story;
+    if(!s) return;
+    this._stopNarration();
+    this.state.story=null;
+    this._runContinuation(s.continuation);
+    // Start the next queued book only if the continuation did not open one already
+    if(!this.state.story && this.pendingStories.length>0){
+      const next=this.pendingStories.shift();
+      this._beginStory(next.book, next.continuation);
+    }
+  }
+
+  _nextPage() {
+    const s=this.state.story;
+    if(!s||s.flip) return;
+    if(s.pageIndex>=s.book.pages.length-1){ this._endStory(); return; }
+    this._startFlip(1, s.pageIndex+1);
+  }
+
+  _prevPage() {
+    const s=this.state.story;
+    if(!s||s.flip||s.pageIndex<=0) return;
+    this._startFlip(-1, s.pageIndex-1);
+  }
+
+  _startFlip(dir, to) {
+    const s=this.state.story;
+    if(!s) return;
+    this._stopNarration();
+    s.flip={dir, to, t:0};
+  }
+
+  _updateStory(dt) {
+    const s=this.state.story;
+    if(!s||!s.flip) return;
+    s.flip.t=Math.min(1, s.flip.t+dt/700);
+    if(s.flip.t>=1){
+      s.pageIndex=s.flip.to;
+      s.flip=null;
+      this._startPageNarration(false);
+    }
+  }
+
+  // ── Narration ─────────────────────────────────────────────────────────────
+
+  // Stops any narration and invalidates pending callbacks.
+  _stopNarration() {
+    const s=this.state.story;
+    if(s){
+      s.token++;
+      s.narrating=false;
+      if(s.timer!==null){ clearTimeout(s.timer); s.timer=null; }
+      if(s.audio){ s.audio.pause(); s.audio=null; }
+    }
+    try { if(window.speechSynthesis) window.speechSynthesis.cancel(); } catch(err) {}
+    if(_hasNativeSpeech()) _postToApp({type:'stopSpeech'});
+  }
+
+  // Reads the current page aloud. manual = started by the player (always reads).
+  // Otherwise the page is read only when the book has "Read each page aloud" on.
+  _startPageNarration(manual) {
+    const s=this.state.story;
+    if(!s||s.flip) return;
+    this._stopNarration();
+    const token=s.token;
+    const page=s.book.pages[s.pageIndex];
+    if(!page) return;
+    const narrate=manual||s.book.autoRead;
+    if(narrate){
+      const audioUrl=this._assetUrl(page.audioAssetId);
+      if(audioUrl){
+        const audio=new Audio(audioUrl);
+        s.audio=audio;
+        s.narrating=true;
+        audio.onended=()=>this._onNarrationDone(token);
+        audio.play().catch(()=>this._paceStoryPage(token, page));
+        return;
+      }
+      // Inside the Android app, speech goes through the native module (WebView speech is unreliable there)
+      if(page.text.trim() && _hasNativeSpeech()){
+        s.narrating=true;
+        _postToApp({type:'speak', id:token, text:page.text, rate:page.rate||1, pitch:(page.pitch===undefined?1:page.pitch)});
+        return;
+      }
+      if(page.text.trim() && ('speechSynthesis' in window)){
+        const u=new SpeechSynthesisUtterance(page.text);
+        u.rate=page.rate||1;
+        u.pitch=(page.pitch===undefined?1:page.pitch);
+        const voice=window.speechSynthesis.getVoices().find(v=>v.name===page.voiceName);
+        if(voice) u.voice=voice;
+        u.onend=()=>this._onNarrationDone(token);
+        u.onerror=()=>{ if(s.token===token) s.narrating=false; };
+        s.narrating=true;
+        window.speechSynthesis.speak(u);
+        return;
+      }
+      // Nothing can be read aloud for this page
+      this._paceStoryPage(token, page);
+    }
+  }
+
+  // Narration has no audio to wait on: wait a length-based time, then auto-advance if enabled.
+  _paceStoryPage(token, page) {
+    const s=this.state.story;
+    if(!s||s.token!==token) return;
+    s.narrating=false;
+    if(!s.book.autoAdvance) return;
+    const words=page.text.split(' ').filter(Boolean).length;
+    const ms=Math.max(2500, words*450);
+    s.timer=setTimeout(()=>this._onNarrationDone(token), ms);
+  }
+
+  _onNarrationDone(token) {
+    const s=this.state.story;
+    if(!s||s.token!==token) return;
+    s.narrating=false;
+    s.audio=null;
+    s.timer=null;
+    if(s.book.autoAdvance) this._nextPage();
+  }
+
+  _toggleStoryNarration() {
+    const s=this.state.story;
+    if(!s||s.flip) return;
+    if(s.narrating) this._stopNarration();
+    else this._startPageNarration(true);
+  }
+
+  // ── Story input ───────────────────────────────────────────────────────────
+
+  _handleStoryClick(e) {
+    const s=this.state.story;
+    if(!s) return;
+    const r=this.canvas.getBoundingClientRect();
+    const cx=(e.clientX-r.left)*(this.lw/r.width);
+    const cy=(e.clientY-r.top)*(this.lh/r.height);
+    const hit=(b)=>cx>=b.x&&cx<=b.x+b.w&&cy>=b.y&&cy<=b.y+b.h;
+    if(hit(this.saveButtonRect)){ this._openSaveMenu('save', false); return; }
+    if(hit(this.storyRects.skip)){ this._endStory(); return; }
+    if(hit(this.storyRects.speaker)){ this._toggleStoryNarration(); return; }
+    if(!hit(this.storyRects.page)) return;
+    // Left third of the page turns back, everything else turns forward
+    if(cx < this.storyRects.page.x + this.storyRects.page.w*0.3) this._prevPage();
+    else this._nextPage();
+  }
+
+  _handleStoryKey(e) {
+    switch(e.key){
+      case 'ArrowRight': case ' ': case 'Enter':
+        e.preventDefault(); this._nextPage(); break;
+      case 'ArrowLeft': case 'Backspace':
+        e.preventDefault(); this._prevPage(); break;
+      case 'Escape':
+        e.preventDefault(); this._endStory(); break;
+      case 'r': case 'R':
+        this._toggleStoryNarration(); break;
+    }
+  }
+
+  // ── Story rendering ───────────────────────────────────────────────────────
+
+  _renderStory() {
+    const s=this.state.story;
+    if(!s) return;
+    const {canvas,ctx}=this;
+    const cw=this.lw, ch=this.lh;
+    ctx.fillStyle='#14100c'; ctx.fillRect(0,0,cw,ch);
+    const W=Math.max(160, Math.min(cw-80, 620));
+    const H=Math.max(200, Math.min(ch-110, 480));
+    const X0=(cw-W)/2, Y0=(ch-H)/2-8;
+    this.storyRects.page={x:X0,y:Y0,w:W,h:H};
+    // Leather board behind the page
+    ctx.fillStyle='#4a2c18'; ctx.fillRect(X0-10,Y0-8,W+20,H+16);
+    const book=s.book;
+    if(s.flip){
+      const flip=s.flip;
+      // The page being revealed sits underneath
+      this._drawStoryPage(book.pages[flip.to], book, X0, Y0, W, H, flip.to);
+      // The turning sheet: its width goes W -> 0 -> W (folding over the spine)
+      const sx=Math.max(0.001, Math.abs(Math.cos(Math.PI*flip.t)));
+      const showFront=flip.t<0.5;
+      const faceIndex=showFront ? s.pageIndex : flip.to;
+      const sheetX=flip.dir===1 ? X0 : X0+W-W*sx;
+      ctx.save();
+      ctx.translate(flip.dir===1 ? X0 : X0+W, Y0);
+      ctx.scale(sx,1);
+      this._drawStoryPage(book.pages[faceIndex], book, flip.dir===1 ? 0 : -W, 0, W, H, faceIndex);
+      ctx.restore();
+      // Shade the sheet as it turns away from the light
+      ctx.fillStyle='rgba(0,0,0,'+(0.4*(1-sx)).toFixed(3)+')';
+      ctx.fillRect(sheetX, Y0, W*sx, H);
+    } else {
+      this._drawStoryPage(book.pages[s.pageIndex], book, X0, Y0, W, H, s.pageIndex);
+    }
+    // Controls
+    const skipW=this._tap(80), btnH=this._tap(28);
+    this.storyRects.speaker={x:10,y:10,w:150,h:btnH};
+    this.storyRects.skip={x:cw-skipW-10,y:10,w:skipW,h:btnH};
+    this._drawStoryButton(this.storyRects.speaker, s.narrating ? 'Stop reading (R)' : 'Read aloud (R)');
+    this._drawStoryButton(this.storyRects.skip, 'Skip (Esc)');
+    this._renderSaveButton();
+    // Page counter and turn hints
+    ctx.font='13px sans-serif'; ctx.fillStyle='#e8d9b5'; ctx.textBaseline='middle';
+    const hintY=Y0+H+22;
+    ctx.textAlign='center'; ctx.fillText((s.pageIndex+1)+' / '+book.pages.length, cw/2, hintY);
+    ctx.textAlign='left'; if(s.pageIndex>0) ctx.fillText('◀ back', X0, hintY);
+    ctx.textAlign='right'; ctx.fillText(s.pageIndex>=book.pages.length-1 ? 'Finish ▶' : 'next ▶', X0+W, hintY);
+  }
+
+  _drawStoryButton(r, label) {
+    const {ctx}=this;
+    ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(r.x,r.y,r.w,r.h);
+    ctx.strokeStyle='#c9a66b'; ctx.lineWidth=1; ctx.strokeRect(r.x,r.y,r.w,r.h);
+    ctx.font='13px sans-serif'; ctx.fillStyle='#f1e6c8';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label, r.x+r.w/2, r.y+r.h/2);
+  }
+
+  _drawStoryPage(page, book, x, y, w, h, pageNum) {
+    if(!page) return;
+    const {ctx}=this;
+    const PAPER={parchment:{bg:'#f3e3c3',fg:'#3b2c1a'}, white:{bg:'#fbfaf6',fg:'#1f2937'}, dark:{bg:'#2a2730',fg:'#ece7dc'}};
+    const paper=PAPER[book.paperStyle]||PAPER.parchment;
+    ctx.fillStyle=paper.bg; ctx.fillRect(x,y,w,h);
+    // Gutter shadow along the spine
+    const gutter=ctx.createLinearGradient(x,0,x+w*0.08,0);
+    gutter.addColorStop(0,'rgba(0,0,0,0.18)'); gutter.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gutter; ctx.fillRect(x,y,w*0.08,h);
+    ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=1; ctx.strokeRect(x,y,w,h);
+
+    const pad=Math.max(18, w*0.05), footerH=34, innerW=w-pad*2;
+    let top=y+pad;
+    const imgUrl=this._assetUrl(page.imageAssetId);
+    const img=imgUrl ? this.imageCache.get(imgUrl) : undefined;
+    if(img){
+      const maxImgH=(h-pad*2-footerH)*0.45;
+      const scale=Math.min(innerW/img.width, maxImgH/img.height);
+      const dw=img.width*scale, dh=img.height*scale;
+      ctx.drawImage(img, x+(w-dw)/2, top, dw, dh);
+      top+=dh+14;
+    }
+    const textBottom=y+h-footerH;
+    const laid=this._layoutStoryText(page.text, innerW, textBottom-top, book.fontSize);
+    ctx.font=laid.fs+'px '+this._storyFont();
+    ctx.fillStyle=paper.fg; ctx.textAlign='left'; ctx.textBaseline='top';
+    let ty=top;
+    for(const line of laid.lines){ ctx.fillText(line, x+pad, ty); ty+=laid.lh; }
+
+    ctx.font='12px '+this._storyFont();
+    ctx.fillStyle=paper.fg; ctx.globalAlpha=0.6;
+    ctx.textAlign='center'; ctx.textBaseline='bottom';
+    ctx.fillText(String(pageNum+1), x+w/2, y+h-12);
+    ctx.globalAlpha=1;
+  }
+
+  _storyFont() { return 'Georgia, "Times New Roman", serif'; }
+
+  // Word-wraps text, shrinking the font (down to 11px) until it fits in maxH.
+  _layoutStoryText(text, maxW, maxH, baseFs) {
+    const {ctx}=this;
+    const wrap=(fs)=>{
+      ctx.font=fs+'px '+this._storyFont();
+      const out=[];
+      for(const para of text.split('\\n')){
+        const words=para.split(' ').filter(Boolean);
+        if(words.length===0){ out.push(''); continue; }
+        let line='';
+        for(const word of words){
+          const test=line ? line+' '+word : word;
+          if(line && ctx.measureText(test).width>maxW){ out.push(line); line=word; }
+          else line=test;
+        }
+        out.push(line);
+      }
+      return out;
+    };
+    for(let fs=Math.max(11,baseFs); fs>=11; fs-=1){
+      const lh=Math.round(fs*1.45);
+      const lines=wrap(fs);
+      if(lines.length*lh<=maxH) return {lines, fs, lh};
+    }
+    const lh=Math.round(11*1.45);
+    return {lines: wrap(11).slice(0, Math.max(1, Math.floor(maxH/lh))), fs: 11, lh};
+  }
+
+  // ── Touch controls ────────────────────────────────────────────────────────
+
+  // Canvas pixels per on-screen CSS pixel (1 when the canvas is not laid out).
+  _screenScale() {
+    const h=this.canvas.clientHeight;
+    return h>0 ? h/this.lh : 1;
+  }
+
+  // A size in canvas pixels; on touch screens it grows so the target is at least 44 CSS pixels.
+  _tap(basePx) {
+    if(!this.touch) return basePx;
+    return Math.max(basePx, Math.ceil(TAP_MIN_CSS_PX/this._screenScale()));
+  }
+
+  _canvasPoint(e) {
+    const r=this.canvas.getBoundingClientRect();
+    return {x:(e.clientX-r.left)*(this.lw/r.width), y:(e.clientY-r.top)*(this.lh/r.height)};
+  }
+
+  _dpadKeyAt(p) {
+    const keys=Object.keys(this.dpadRects);
+    for(const key of keys){
+      const r=this.dpadRects[key];
+      if(r.w>0 && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h) return key;
+    }
+    return null;
+  }
+
+  // Four-way pad at the bottom-left. Holding an arrow sets the same key the keyboard would.
+  _renderDpad() {
+    const hidden={x:0,y:0,w:0,h:0};
+    const visible=this.touch && !this.state.showTitleScreen && !this.state.story && !this.state.saveMenu &&
+      !this.state.miniGame && !this.state.questLogOpen && !this.state.cinematic && !this.state.dialogText;
+    if(!visible){
+      this.dpadRects={ArrowUp:hidden, ArrowDown:hidden, ArrowLeft:hidden, ArrowRight:hidden};
+      return;
+    }
+    const {canvas, ctx}=this;
+    const s=this._tap(60);
+    const cx=16+s*1.5, cy=this.lh-16-s*1.5;
+    const centres={ArrowUp:[cx,cy-s], ArrowDown:[cx,cy+s], ArrowLeft:[cx-s,cy], ArrowRight:[cx+s,cy]};
+    const glyph={ArrowUp:'▲', ArrowDown:'▼', ArrowLeft:'◀', ArrowRight:'▶'};
+    const held=new Set(this.dpadPointers.values());
+    for(const key of Object.keys(centres)){
+      const x=centres[key][0], y=centres[key][1];
+      const r={x:x-s/2+4, y:y-s/2+4, w:s-8, h:s-8};
+      this.dpadRects[key]=r;
+      ctx.fillStyle=held.has(key) ? 'rgba(99,102,241,0.85)' : 'rgba(0,0,0,0.45)';
+      ctx.strokeStyle='#c7d2fe'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.roundRect(r.x,r.y,r.w,r.h,10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#e0e7ff'; ctx.font=Math.round(s*0.4)+'px sans-serif';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(glyph[key], r.x+r.w/2, r.y+r.h/2);
+    }
+  }
+
+  _handlePointerDown(e) {
+    if(!this.touch) return;
+    const key=this._dpadKeyAt(this._canvasPoint(e));
+    if(!key) return;
+    this.dpadPointers.set(e.pointerId, key);
+    this.activeKeys.add(key);
+  }
+
+  // Sliding a held finger onto another arrow switches to it; sliding off the pad releases it.
+  _handlePointerMove(e) {
+    const held=this.dpadPointers.get(e.pointerId);
+    if(!held) return;
+    const over=this._dpadKeyAt(this._canvasPoint(e));
+    if(over===held) return;
+    this.dpadPointers.delete(e.pointerId);
+    if(!new Set(this.dpadPointers.values()).has(held)) this.activeKeys.delete(held);
+    if(over){ this.dpadPointers.set(e.pointerId, over); this.activeKeys.add(over); }
+  }
+
+  _handlePointerUp(e) {
+    const key=this.dpadPointers.get(e.pointerId);
+    if(!key) return;
+    this.dpadPointers.delete(e.pointerId);
+    if(!new Set(this.dpadPointers.values()).has(key)) this.activeKeys.delete(key);
+  }
+
+  // ── Save slots (player saves in localStorage) ─────────────────────────────
+
+  _saveSlotCount() {
+    const n=Math.floor(Number(this.project.settings&&this.project.settings.saveSlotCount)||3);
+    return Math.min(10, Math.max(1, n));
+  }
+
+  _saveKey(slot) { return 'agb-save:'+this.project.id+':'+slot; }
+
+  readSaveSlot(slot) {
+    let raw;
+    try { raw=localStorage.getItem(this._saveKey(slot)); }
+    catch(err) { return {status:'corrupt'}; }
+    if(!raw) return {status:'empty'};
+    try {
+      const data=JSON.parse(raw);
+      if(data && data.version===1) return {status:'ok', data:data};
+    } catch(err) { /* unreadable JSON */ }
+    return {status:'corrupt'};
+  }
+
+  _writeSaveSlot(slot, data) {
+    const json=JSON.stringify(data);
+    const kb=Math.max(1, Math.ceil(json.length/1024));
+    try {
+      localStorage.setItem(this._saveKey(slot), json);
+      return {ok:true, kb:kb};
+    } catch(err) {
+      const quota=(err && (err.name==='QuotaExceededError' || err.name==='NS_ERROR_DOM_QUOTA_REACHED'));
+      return {ok:false, error: quota
+        ? 'Not saved: browser storage is full (about 5 MB per site). Clear a slot and try again.'
+        : 'Not saved: browser storage is blocked.'};
+    }
+  }
+
+  // Captures everything needed to resume. Story progress is stored as data, not callbacks.
+  _buildSaveData() {
+    const scene=this.project.scenes.find(sc=>sc.id===this.state.currentSceneId);
+    const stage=this._currentStage();
+    const story=this.state.story;
+    const hero=this.state.character;
+    return {
+      version:1,
+      projectId:this.project.id,
+      savedAt:new Date().toISOString(),
+      sceneName:(scene&&scene.name)||'',
+      stageName:(stage&&stage.name)||'',
+      sceneId:this.state.currentSceneId,
+      stageId:this.state.currentStageId,
+      variables:Object.assign({}, this.state.variables),
+      visitedScenes:this.state.visitedScenes.slice(),
+      activeQuestIds:this.state.activeQuestIds.slice(),
+      completedQuestIds:this.state.completedQuestIds.slice(),
+      completedGoalIds:(this.project.goals||[]).filter(g=>g.completed).map(g=>g.id),
+      character:hero ? {x:hero.x, y:hero.y, facing:hero.facing} : null,
+      npcs:Array.from(this.state.npcStates.entries()).map(([objectId,n])=>({objectId:objectId, x:n.x, y:n.y, facing:n.facing})),
+      objectVisibility:Array.from(this.objectVisibility.entries()),
+      removedObjects:Array.from(this.removedObjects),
+      // Spawned objects are saved as a reference to their template plus position, never as full copies
+      spawned:this.project.scenes.flatMap(sc=>sc.objects
+        .filter(o=>this.spawnTemplateIds.has(o.id))
+        .map(o=>({sceneId:sc.id, id:o.id, templateId:this.spawnTemplateIds.get(o.id)||'', x:o.x, y:o.y}))),
+      story: story ? {bookId:story.book.id, pageIndex:(story.flip ? story.flip.to : story.pageIndex), continuation:story.continuation} : null,
+      pendingStories:this.pendingStories.map(p=>({bookId:p.book.id, continuation:p.continuation})),
+    };
+  }
+
+  _findObjectById(id) {
+    for(const sc of this.project.scenes){
+      const o=sc.objects.find(x=>x.id===id);
+      if(o) return o;
+    }
+    return undefined;
+  }
+
+  // Rebuilds the game from a save. Fires no enter/stage events, since those already ran before the save.
+  _restoreFromSave(data) {
+    if(data.version!==1 || data.projectId!==this.project.id) return false;
+    const books=this.project.storyBooks||[];
+    this._stopNarration();
+    this.state.story=null;
+    this.pendingStories=[];
+    this.state.dialogText=null; this.state.dialogCallback=null;
+    this.state.cinematic=null; this.state.questLogOpen=false;
+    this.state.saveMenu=null; this.state.showTitleScreen=false;
+    this.activeKeys.clear();
+
+    this.state.currentStageId=data.stageId;
+    this.state.variables=Object.assign({}, data.variables);
+    this.state.visitedScenes=data.visitedScenes.slice();
+    this.state.activeQuestIds=data.activeQuestIds.slice();
+    this.state.completedQuestIds=data.completedQuestIds.slice();
+
+    // Goal completion is stored on the goal objects, so set every goal explicitly
+    const doneGoals=new Set(data.completedGoalIds);
+    for(const g of (this.project.goals||[])) g.completed=doneGoals.has(g.id);
+
+    // Replace this session's spawns with the saved ones
+    for(const sc of this.project.scenes) sc.objects=sc.objects.filter(o=>!this.spawnTemplateIds.has(o.id));
+    this.spawnTemplateIds=new Map();
+    for(const sp of data.spawned){
+      const sc=this.project.scenes.find(x=>x.id===sp.sceneId);
+      const template=this._findObjectById(sp.templateId);
+      if(!sc || !template) continue;
+      sc.objects.push(Object.assign({}, template, {id:sp.id, x:sp.x, y:sp.y, visible:true}));
+      this.spawnTemplateIds.set(sp.id, sp.templateId);
+    }
+
+    this.objectVisibility=new Map(data.objectVisibility);
+    this.removedObjects=new Set(data.removedObjects);
+    this.state.currentSceneId=data.sceneId;
+    this.state.activeHotspots=new Set();
+    this.state.activeTeleportZones=new Set();
+    this._buildSceneState(data.sceneId, data.character||undefined, false);
+
+    // Put NPCs back where they were
+    for(const n of data.npcs){
+      const st=this.state.npcStates.get(n.objectId);
+      if(st){ st.x=n.x; st.y=n.y; st.facing=n.facing; }
+    }
+
+    // Resume any story that was open, then any that were queued behind it
+    this.pendingStories=data.pendingStories
+      .map(p=>({book:books.find(b=>b.id===p.bookId), continuation:p.continuation}))
+      .filter(p=>p.book);
+    if(data.story){
+      const book=books.find(b=>b.id===data.story.bookId);
+      if(book) this._beginStory(book, data.story.continuation, data.story.pageIndex);
+      else this._runContinuation(data.story.continuation);
+    }
+    if(!this.state.story && this.pendingStories.length>0){
+      const next=this.pendingStories.shift();
+      this._beginStory(next.book, next.continuation);
+    }
+    return true;
+  }
+
+  _openSaveMenu(mode, fromTitle) {
+    this.state.saveMenu={mode: fromTitle ? 'load' : mode, fromTitle: !!fromTitle};
+    this.activeKeys.clear();
+  }
+
+  _closeSaveMenu() { this.state.saveMenu=null; }
+
+  // ── Save/Load screen ──────────────────────────────────────────────────────
+
+  _renderSaveButton() {
+    if(this.state.showTitleScreen) return;
+    const {ctx, canvas}=this;
+    // Inside a story the button sits right of the Read aloud button; in play it sits left of the quest button
+    const w=this._tap(84), h=this._tap(28), y=8;
+    const x=this.state.story ? 168 : this.lw-this._tap(52)-8-8-w;
+    this.saveButtonRect={x,y,w,h};
+    ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.strokeStyle='#4f46e5'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e2e8f0';
+    ctx.font='bold '+Math.max(10,Math.min(12,this.lw/80))+'px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('Save / Load', x+w/2, y+h/2);
+  }
+
+  _drawSaveMenuButton(r, label, active) {
+    const {ctx}=this;
+    ctx.fillStyle=active ? '#4f46e5' : 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle='#4f46e5'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.roundRect(r.x,r.y,r.w,r.h,6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e2e8f0'; ctx.font='bold 13px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label, r.x+r.w/2, r.y+r.h/2);
+  }
+
+  _renderSaveMenu() {
+    const sm=this.state.saveMenu;
+    if(!sm) return;
+    const {canvas, ctx}=this;
+    const cw=this.lw, ch=this.lh;
+    ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,0,cw,ch);
+    const slots=this._saveSlotCount();
+    const panelW=Math.min(cw-40, 480);
+    const panelH=Math.min(ch-40, 170+slots*64);
+    const px=(cw-panelW)/2, py=(ch-panelH)/2;
+    ctx.fillStyle='#111827'; ctx.strokeStyle='#4f46e5'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(px,py,panelW,panelH,10); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e2e8f0'; ctx.font='bold 18px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText(sm.mode==='save' ? 'Save Game' : 'Load Game', cw/2, py+16);
+
+    const tabY=py+48, tabW=110, tabH=this._tap(28);
+    if(sm.fromTitle){
+      this.saveMenuRects.tabSave={x:0,y:0,w:0,h:0};
+      this.saveMenuRects.tabLoad={x:cw/2-tabW/2, y:tabY, w:tabW, h:tabH};
+    } else {
+      this.saveMenuRects.tabSave={x:cw/2-tabW-4, y:tabY, w:tabW, h:tabH};
+      this.saveMenuRects.tabLoad={x:cw/2+4, y:tabY, w:tabW, h:tabH};
+      this._drawSaveMenuButton(this.saveMenuRects.tabSave, 'Save', sm.mode==='save');
+    }
+    this._drawSaveMenuButton(this.saveMenuRects.tabLoad, 'Load', sm.mode==='load');
+
+    const top=tabY+tabH+14;
+    const bottomReserved=74;
+    const rowH=Math.max(28, Math.min(56, (py+panelH-bottomReserved-top)/slots-8));
+    this.saveMenuRects.slots=[];
+    for(let i=0;i<slots;i++){
+      const r={x:px+16, y:top+i*(rowH+8), w:panelW-32, h:rowH};
+      this.saveMenuRects.slots.push(r);
+      const read=this.readSaveSlot(i+1);
+      const data=read.status==='ok' ? read.data : null;
+      const usable=sm.mode==='save' || read.status!=='empty';
+      ctx.globalAlpha=usable ? 1 : 0.45;
+      ctx.fillStyle='rgba(255,255,255,0.05)';
+      // Amber outline marks the slot waiting for a second click to overwrite
+      const armed=sm.confirmSlot===i+1;
+      ctx.strokeStyle=armed ? '#f59e0b' : '#374151';
+      ctx.lineWidth=armed ? 2 : 1;
+      ctx.beginPath(); ctx.roundRect(r.x,r.y,r.w,r.h,6); ctx.fill(); ctx.stroke();
+      ctx.textAlign='left'; ctx.textBaseline='middle';
+      ctx.fillStyle='#e2e8f0'; ctx.font='bold 13px sans-serif';
+      ctx.fillText('Slot '+(i+1), r.x+12, r.y+r.h/2-(read.status==='empty' ? 0 : 8));
+      if(data){
+        ctx.fillStyle='#94a3b8'; ctx.font='12px sans-serif';
+        const place=[data.sceneName, data.stageName].filter(Boolean).join(' · ');
+        ctx.fillText(place||'Saved game', r.x+12, r.y+r.h/2+9);
+        ctx.textAlign='right';
+        ctx.fillText(new Date(data.savedAt).toLocaleString(), r.x+r.w-12, r.y+r.h/2);
+      } else if(read.status==='corrupt'){
+        ctx.fillStyle='#f87171'; ctx.font='12px sans-serif';
+        ctx.fillText('Damaged save: cannot be loaded', r.x+12, r.y+r.h/2+9);
+      } else {
+        ctx.fillStyle='#64748b'; ctx.font='12px sans-serif';
+        ctx.fillText('Empty', r.x+12, r.y+r.h/2+9);
+      }
+      ctx.globalAlpha=1;
+    }
+
+    ctx.fillStyle=sm.messageIsError ? '#fca5a5' : '#a5b4fc'; ctx.font='12px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    const backH=this._tap(30);
+    const backY=py+panelH-backH-12;
+    if(sm.message) ctx.fillText(sm.message, cw/2, backY-14);
+    this.saveMenuRects.back={x:cw/2-60, y:backY, w:120, h:backH};
+    this._drawSaveMenuButton(this.saveMenuRects.back, 'Back (Esc)', false);
+  }
+
+  _handleSaveMenuClick(e) {
+    const sm=this.state.saveMenu;
+    if(!sm) return;
+    const r=this.canvas.getBoundingClientRect();
+    const cx=(e.clientX-r.left)*(this.lw/r.width);
+    const cy=(e.clientY-r.top)*(this.lh/r.height);
+    const hit=(b)=>cx>=b.x&&cx<=b.x+b.w&&cy>=b.y&&cy<=b.y+b.h;
+    const setMessage=(text, isError)=>{ sm.message=text; sm.messageIsError=!!isError; };
+
+    if(hit(this.saveMenuRects.back)){ this._closeSaveMenu(); return; }
+    if(hit(this.saveMenuRects.tabSave) && !sm.fromTitle){ sm.mode='save'; sm.confirmSlot=undefined; setMessage(undefined); return; }
+    if(hit(this.saveMenuRects.tabLoad)){ sm.mode='load'; sm.confirmSlot=undefined; setMessage(undefined); return; }
+
+    const slotIndex=this.saveMenuRects.slots.findIndex(b=>hit(b));
+    if(slotIndex<0) return;
+    const slot=slotIndex+1;
+    const current=this.readSaveSlot(slot);
+
+    if(sm.mode==='save'){
+      if(sm.fromTitle) return;
+      // Overwriting needs a second click on the same slot
+      if(current.status!=='empty' && sm.confirmSlot!==slot){
+        sm.confirmSlot=slot;
+        setMessage('Slot '+slot+' already has a save. Click it again to overwrite.');
+        return;
+      }
+      sm.confirmSlot=undefined;
+      const result=this._writeSaveSlot(slot, this._buildSaveData());
+      if(result.ok) setMessage('Saved to slot '+slot+' ('+result.kb+' KB)');
+      else setMessage(result.error, true);
+      return;
+    }
+
+    sm.confirmSlot=undefined;
+    if(current.status==='empty') return;
+    if(current.status==='corrupt'){ setMessage('Slot '+slot+' is damaged and cannot be loaded.', true); return; }
+    if(!this._restoreFromSave(current.data)) setMessage('That save belongs to a different game', true);
   }
 
   _loop() {
@@ -367,7 +1248,9 @@ export class GameEngine {
     const now = performance.now();
     const dt = this.lastFrameTime ? Math.min(now - this.lastFrameTime, 100) : 16;
     this.lastFrameTime = now;
-    if(!this.state.showTitleScreen){
+    if(this.state.story && !this.state.saveMenu) this._updateStory(dt);
+    // The scene is frozen while a story book is open
+    if(!this.state.showTitleScreen && !this.state.story && !this.state.saveMenu){
       this._updateCharacter(dt);
       const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
       if(scene){this._updateArrowMovement(dt,scene);this._checkHotspots(scene);this._checkCollisions(scene);this._checkScaleZones(scene);this._checkSceneEdges(scene);this._checkTeleportZones(scene);this._updateNpcs(dt,scene);}
@@ -466,12 +1349,7 @@ export class GameEngine {
   }
   _findSafeArrival(scene,mc,nomX,nomY,side) {
     const zones=scene.blockedZones||[];
-    const overlaps=(x,y)=>{
-      for(const z of zones){
-        if(x<z.x+z.width&&x+mc.width>z.x&&y<z.y+z.height&&y+mc.height>z.y) return true;
-      }
-      return false;
-    };
+    const overlaps=(x,y)=>feetBlocked(zones, x, mc.width, y+mc.height);
     if(!overlaps(nomX,nomY)) return {x:nomX,y:nomY};
     const step=4;
     if(side==='left'||side==='right'){
@@ -555,11 +1433,9 @@ export class GameEngine {
     }
   }
 
-  _isBlockedAt(x,y,cw,ch,scene){
-    for(const z of (scene.blockedZones||[])){
-      if(x<z.x+z.width&&x+cw>z.x&&y<z.y+z.height&&y+ch>z.y) return true;
-    }
-    return false;
+  // A position is blocked when the character's feet would be inside a zone (the head may overlap).
+  _isBlockedAt(x,y,cw,ch,scene,fromFeetY){
+    return feetBlocked(scene.blockedZones||[], x, cw, y+ch, fromFeetY===undefined ? y+ch : fromFeetY);
   }
 
   _updateArrowMovement(dt,scene){
@@ -580,7 +1456,7 @@ export class GameEngine {
     const newX=Math.max(0,Math.min(scene.width-cw,char.x+dx));
     if(!this._isBlockedAt(newX,char.y,cw,ch,scene)) char.x=newX;
     const newY=Math.max(0,Math.min(scene.height-ch,char.y+dy));
-    if(!this._isBlockedAt(char.x,newY,cw,ch,scene)) char.y=newY;
+    if(!this._isBlockedAt(char.x,newY,cw,ch,scene,char.y+ch)) char.y=newY;
     char.moving=true;
     const anim=this._getCharAnim(char.facing);
     if(anim&&anim.fps>0){
@@ -591,17 +1467,24 @@ export class GameEngine {
 
   _render() {
     const { canvas, ctx } = this;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, this.lw, this.lh);
+    if(this.state.story){ this._renderStory(); if(this.state.saveMenu) this._renderSaveMenu(); return; }
+    this._renderMainFrame();
+    if(this.state.saveMenu) this._renderSaveMenu();
+  }
+
+  _renderMainFrame() {
+    const { canvas, ctx } = this;
     if(this.state.showTitleScreen){ this._renderTitleScreen(); return; }
     const scene = this.project.scenes.find(s => s.id === this.state.currentSceneId);
     if (!scene) {
-      ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,this.lw,this.lh);
       ctx.fillStyle = '#e2e8f0'; ctx.font = '20px sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('No scene', canvas.width/2, canvas.height/2);
+      ctx.fillText('No scene', this.lw/2, this.lh/2);
       return;
     }
-    const sx = canvas.width/scene.width, sy = canvas.height/scene.height;
+    const sx = this.lw/scene.width, sy = this.lh/scene.height;
     ctx.save(); ctx.scale(sx, sy);
     ctx.fillStyle = scene.backgroundColor || '#000';
     ctx.fillRect(0, 0, scene.width, scene.height);
@@ -673,31 +1556,33 @@ export class GameEngine {
     if (this.state.dialogText) this._renderDialog();
     if(this.state.cinematic&&this.state.cinematic.actionText) this._renderActionLabel();
     this._renderQuestHUDButton();
+    this._renderSaveButton();
+    this._renderDpad();
     if(this.state.questLogOpen) this._renderQuestLog();
   }
 
   _renderTitleScreen(){
     const{canvas,ctx}=this,ts=this.project.titleScreen;
     ctx.fillStyle=ts?.backgroundColor||'#000000';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    if(ts?.backgroundImageUrl){const img=this.imageCache.get(ts.backgroundImageUrl);if(img)ctx.drawImage(img,0,0,canvas.width,canvas.height);}
+    ctx.fillRect(0,0,this.lw,this.lh);
+    if(ts?.backgroundImageUrl){const img=this.imageCache.get(ts.backgroundImageUrl);if(img)ctx.drawImage(img,0,0,this.lw,this.lh);}
     if(ts?.titleText){
       ctx.font='bold '+(ts.titleFontSize||48)+'px sans-serif';
       ctx.fillStyle=ts.titleColor||'#ffffff';
       ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText(ts.titleText,canvas.width/2,canvas.height*0.22);
+      ctx.fillText(ts.titleText,this.lw/2,this.lh*0.22);
     }
     if(ts?.subtitleText){
       ctx.font=(ts.subtitleFontSize||24)+'px sans-serif';
       ctx.fillStyle=ts.subtitleColor||'#cccccc';
       ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText(ts.subtitleText,canvas.width/2,canvas.height*0.36);
+      ctx.fillText(ts.subtitleText,this.lw/2,this.lh*0.36);
     }
     this.titleScreenButtonRects=[];
     const btns=[...(ts?.buttons||[])].sort((a,b)=>a.order-b.order);
-    const bw=Math.min(240,canvas.width*0.5),bh=48,bg=16,sy=canvas.height*0.52;
+    const bw=Math.min(240,this.lw*0.5),bh=48,bg=16,sy=this.lh*0.52;
     btns.forEach((btn,i)=>{
-      const x=(canvas.width-bw)/2,y=sy+i*(bh+bg);
+      const x=(this.lw-bw)/2,y=sy+i*(bh+bg);
       this.titleScreenButtonRects.push({id:btn.id,action:btn.action,x,y,w:bw,h:bh});
       ctx.fillStyle='rgba(99,102,241,0.9)';
       ctx.beginPath();ctx.roundRect(x,y,bw,bh,8);ctx.fill();
@@ -708,9 +1593,10 @@ export class GameEngine {
     });
   }
 
-  _startGame(_action){
+  _startGame(action){
+    if(action==='load_game'){ this._openSaveMenu('load', true); return; }
     this.state.showTitleScreen=false;
-    this._loadScene(this.state.currentSceneId,undefined,true);
+    this._runContinuation({kind:'beforeStage'});
   }
 
   _updateNpcs(dt,scene){
@@ -817,13 +1703,13 @@ export class GameEngine {
 
   _renderDialog() {
     const {canvas,ctx}=this;
-    const pad=24,bh=130,by=canvas.height-bh-12;
-    ctx.fillStyle='rgba(0,0,0,0.88)'; ctx.fillRect(8,by,canvas.width-16,bh);
-    ctx.strokeStyle='#6366f1'; ctx.lineWidth=2; ctx.strokeRect(8,by,canvas.width-16,bh);
-    const fs=Math.max(12,Math.min(16,canvas.width/50));
+    const pad=24,bh=130,by=this.lh-bh-12;
+    ctx.fillStyle='rgba(0,0,0,0.88)'; ctx.fillRect(8,by,this.lw-16,bh);
+    ctx.strokeStyle='#6366f1'; ctx.lineWidth=2; ctx.strokeRect(8,by,this.lw-16,bh);
+    const fs=Math.max(12,Math.min(16,this.lw/50));
     ctx.font=fs+'px sans-serif'; ctx.fillStyle='#e2e8f0';
     ctx.textAlign='left'; ctx.textBaseline='top';
-    const mw=canvas.width-16-pad*2, lh=fs+6;
+    const mw=this.lw-16-pad*2, lh=fs+6;
     let ly=by+pad;
     const paragraphs=(this.state.dialogText||'').split('\\n');
     paragraphs.forEach(para=>{
@@ -836,29 +1722,29 @@ export class GameEngine {
       if(line.trim()){ctx.fillText(line.trim(),8+pad,ly);ly+=lh;}
     });
     ctx.fillStyle='#6366f1'; ctx.font='12px sans-serif'; ctx.textAlign='right'; ctx.textBaseline='bottom';
-    ctx.fillText('\\u25b6 Click to continue',canvas.width-16,by+bh-8);
+    ctx.fillText('\\u25b6 Click to continue',this.lw-16,by+bh-8);
   }
 
   _renderQuestHUDButton() {
     if(this.state.showTitleScreen) return;
     const {ctx,canvas}=this;
-    const w=52,h=28,x=canvas.width-w-8,y=8;
+    const w=this._tap(52),h=this._tap(28),x=this.lw-w-8,y=8;
     this.questButtonRect={x,y,w,h};
     ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.strokeStyle='#4f46e5'; ctx.lineWidth=1.5;
     ctx.beginPath(); ctx.roundRect(x,y,w,h,6); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#e2e8f0';
-    ctx.font='bold '+Math.max(10,Math.min(12,canvas.width/80))+'px sans-serif';
+    ctx.font='bold '+Math.max(10,Math.min(12,this.lw/80))+'px sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText('\u{1F4DC} '+this.state.activeQuestIds.length,x+w/2,y+h/2);
   }
 
   _renderQuestLog() {
     const {ctx,canvas}=this;
-    const pw=Math.min(320,canvas.width*0.85),ph=Math.min(canvas.height*0.78,500);
-    const px=canvas.width-pw-8,py=44;
+    const pw=Math.min(320,this.lw*0.85),ph=Math.min(this.lh*0.78,500);
+    const px=this.lw-pw-8,py=44;
     ctx.fillStyle='rgba(15,15,30,0.96)'; ctx.strokeStyle='#4f46e5'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.roundRect(px,py,pw,ph,8); ctx.fill(); ctx.stroke();
-    const fs=Math.max(11,Math.min(13,canvas.width/70)),lh=fs+6,pad=14;
+    const fs=Math.max(11,Math.min(13,this.lw/70)),lh=fs+6,pad=14;
     ctx.fillStyle='#e2e8f0'; ctx.font='bold '+(fs+2)+'px sans-serif';
     ctx.textAlign='left'; ctx.textBaseline='top';
     ctx.fillText('Quest Log',px+pad,py+pad);
@@ -913,6 +1799,8 @@ export class GameEngine {
   }
 
   _handleKeyDown(e) {
+    if(this.state.saveMenu){ if(e.key==='Escape') this._closeSaveMenu(); return; }
+    if(this.state.story){ this._handleStoryKey(e); return; }
     if(this.state.showTitleScreen||this.state.miniGame) return;
     if(e.key==='j'||e.key==='J') this.state.questLogOpen=!this.state.questLogOpen;
     this.activeKeys.add(e.key);
@@ -924,18 +1812,21 @@ export class GameEngine {
 
   _scenePos(e) {
     const r=this.canvas.getBoundingClientRect();
-    const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
-    const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+    const cx=(e.clientX-r.left)*(this.lw/r.width);
+    const cy=(e.clientY-r.top)*(this.lh/r.height);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
     if (!scene) return {x:cx,y:cy};
-    return {x:cx/(this.canvas.width/scene.width), y:cy/(this.canvas.height/scene.height)};
+    return {x:cx/(this.lw/scene.width), y:cy/(this.lh/scene.height)};
   }
 
   _handleClick(e) {
+    if(this.touch && this._dpadKeyAt(this._canvasPoint(e))) return;
+    if(this.state.saveMenu){ this._handleSaveMenuClick(e); return; }
+    if(this.state.story){ this._handleStoryClick(e); return; }
     if(this.state.showTitleScreen){
       const r=this.canvas.getBoundingClientRect();
-      const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
-      const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+      const cx=(e.clientX-r.left)*(this.lw/r.width);
+      const cy=(e.clientY-r.top)*(this.lh/r.height);
       for(const br of this.titleScreenButtonRects){
         if(cx>=br.x&&cx<=br.x+br.w&&cy>=br.y&&cy<=br.y+br.h){this._startGame(br.action);return;}
       }
@@ -947,8 +1838,8 @@ export class GameEngine {
       return;
     }
     const r2=this.canvas.getBoundingClientRect();
-    const cx2=(e.clientX-r2.left)*(this.canvas.width/r2.width);
-    const cy2=(e.clientY-r2.top)*(this.canvas.height/r2.height);
+    const cx2=(e.clientX-r2.left)*(this.lw/r2.width);
+    const cy2=(e.clientY-r2.top)*(this.lh/r2.height);
     if(this.state.questLogOpen){
       const cl=this.questLogCloseRect;
       if(cx2>=cl.x&&cx2<=cl.x+cl.w&&cy2>=cl.y&&cy2<=cl.y+cl.h){this.state.questLogOpen=false;return;}
@@ -956,6 +1847,8 @@ export class GameEngine {
     }
     const qb=this.questButtonRect;
     if(cx2>=qb.x&&cx2<=qb.x+qb.w&&cy2>=qb.y&&cy2<=qb.y+qb.h){this.state.questLogOpen=true;return;}
+    const sb=this.saveButtonRect;
+    if(cx2>=sb.x&&cx2<=sb.x+sb.w&&cy2>=sb.y&&cy2<=sb.y+sb.h){this._openSaveMenu('save', false);return;}
     const pos=this._scenePos(e);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
     if (!scene) return;
@@ -969,25 +1862,48 @@ export class GameEngine {
     const char=this.state.character, mc=this.project.mainCharacter;
     if (char&&mc) {
       const path=findPath(scene.blockedZones||[],scene.width,scene.height,
-        char.x+mc.width/2, char.y+mc.height/2, pos.x, pos.y, mc.width*(char.scale??1), mc.height*(char.scale??1));
+        char.x+mc.width/2, char.y+mc.height/2, pos.x, pos.y, mc.width*(char.scale??1), mc.height*(char.scale??1), mc.height*(char.scale??1)-mc.height/2);
       if (path.length>0) { char.waypoints=path; char.waypointIndex=0; char.moving=true; }
     }
   }
 
+  // Shows the custom cursor for the current state: interact while the button is held,
+  // hover over a clickable object, otherwise default. A state with no image uses the default image;
+  // with no images at all, the browser's pointer/default cursor is used.
+  _applyCursor(hover) {
+    this._cursorHover=hover;
+    if(this.touch){ this.canvas.style.cursor='default'; return; }
+    const name=this._pointerDown ? 'interact' : hover ? 'hover' : 'default';
+    const states=this.project.cursorConfig && this.project.cursorConfig.states;
+    const chain=name==='default' ? ['default'] : [name, 'default'];
+    const picked=chain.map(n=>states && states[n]).find(c=>c && c.imageUrl);
+    const fallback=hover ? 'pointer' : 'default';
+    if(picked && picked.imageUrl){
+      const hx=Math.round(picked.hotspotX||0), hy=Math.round(picked.hotspotY||0);
+      this.canvas.style.cursor='url("'+picked.imageUrl+'") '+hx+' '+hy+', '+fallback;
+    } else {
+      this.canvas.style.cursor=fallback;
+    }
+  }
+
+  _handleMouseDown(e) { this._pointerDown=true; this._applyCursor(this._cursorHover); }
+
+  _handleMouseUp(e) { this._pointerDown=false; this._applyCursor(this._cursorHover); }
+
   _handleMouseMove(e) {
     if(this.state.showTitleScreen){
       const r=this.canvas.getBoundingClientRect();
-      const cx=(e.clientX-r.left)*(this.canvas.width/r.width);
-      const cy=(e.clientY-r.top)*(this.canvas.height/r.height);
+      const cx=(e.clientX-r.left)*(this.lw/r.width);
+      const cy=(e.clientY-r.top)*(this.lh/r.height);
       const onBtn=this.titleScreenButtonRects.some(br=>cx>=br.x&&cx<=br.x+br.w&&cy>=br.y&&cy<=br.y+br.h);
-      this.canvas.style.cursor=onBtn?'pointer':'default';
+      this._applyCursor(onBtn);
       return;
     }
     if (this.state.dialogText) return;
     const pos=this._scenePos(e);
     const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
     if (!scene) return;
-    this.canvas.style.cursor=this._objAt(scene,pos.x,pos.y)?'pointer':'default';
+    this._applyCursor(!!this._objAt(scene,pos.x,pos.y));
   }
 
   _objAt(scene,x,y) {
@@ -1048,6 +1964,7 @@ export class GameEngine {
         const spawnX=(action.spawnX!=null)?action.spawnX:tpl.x;
         const spawnY=(action.spawnY!=null)?action.spawnY:tpl.y;
         tgtScene.objects.push(Object.assign({},tpl,{id:spawnId,x:spawnX,y:spawnY,visible:true}));
+        this.spawnTemplateIds.set(spawnId, tpl.id);
         break;
       }
       case 'play_sound':{
@@ -1056,6 +1973,7 @@ export class GameEngine {
         break;
       }
       case 'play_cinematic': this._playCinematic(action.value); break;
+      case 'play_story': this.playStory(action.value); break;
       case 'launch_minigame': this._launchMiniGame(action); break;
       case 'trigger_event':{
         const ev=(this.project.events||[]).find(e=>e.id===action.value);
@@ -1113,7 +2031,7 @@ export class GameEngine {
           const scene=this.project.scenes.find(s=>s.id===this.state.currentSceneId);
           if(char&&mc&&scene){
             const path=findPath(scene.blockedZones||[],scene.width,scene.height,
-              char.x+mc.width/2,char.y+mc.height/2,step.targetX??0,step.targetY??0,mc.width*(char.scale??1),mc.height*(char.scale??1));
+              char.x+mc.width/2,char.y+mc.height/2,step.targetX??0,step.targetY??0,mc.width*(char.scale??1),mc.height*(char.scale??1),mc.height*(char.scale??1)-mc.height/2);
             if(path.length>0){char.waypoints=path;char.waypointIndex=0;char.moving=true;}
           }
           cine.mode='walking_main';
@@ -1236,7 +2154,7 @@ export class GameEngine {
     const fontSize=20;
     ctx.font='bold '+fontSize+'px sans-serif';
     const w=ctx.measureText(text).width+32,h=44;
-    const x=(canvas.width-w)/2,y=32;
+    const x=(this.lw-w)/2,y=32;
     ctx.fillStyle='rgba(0,0,0,0.75)';
     ctx.beginPath();
     ctx.roundRect(x,y,w,h,8);
@@ -1247,7 +2165,7 @@ export class GameEngine {
     ctx.fillStyle='#fed7aa';
     ctx.textAlign='center';
     ctx.textBaseline='middle';
-    ctx.fillText(text,canvas.width/2,y+h/2);
+    ctx.fillText(text,this.lw/2,y+h/2);
   }
 
   async _loadPhaser(){
@@ -1296,6 +2214,14 @@ export class GameEngine {
       const canvas=document.createElement('canvas');
       canvas.width=800;canvas.height=600;
       overlay.appendChild(canvas);
+      if(this.touch){
+        // Phones: fit the game above an on-screen key bar, so keyboard-only games can be played by touch
+        canvas.style.maxWidth='100%';
+        canvas.style.maxHeight='calc(100% - 72px)';
+        canvas.style.width='auto';
+        canvas.style.height='auto';
+        _buildTouchKeyBar(mg.touchKeys, overlay);
+      }
       document.body.appendChild(overlay);
       const teardown=(result,vars)=>{
         this.state.miniGame?.instance?.destroy();

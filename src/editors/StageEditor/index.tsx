@@ -5,6 +5,7 @@ import type { Stage, StageVariable } from '../../types'
 
 export function StageEditor() {
   const { project, addStage, updateStage, deleteStage, reorderStages } = useGameStore()
+  const storyBooks = project.storyBooks ?? []
   const { stages, scenes } = project
 
   const [selectedStageId, setSelectedStageId] = useState<string>(stages[0]?.id ?? '')
@@ -186,6 +187,40 @@ export function StageEditor() {
                   className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 resize-none"
                   placeholder="Describe this stage..."
                 />
+              </div>
+            </section>
+
+            {/* Story Teller hooks */}
+            <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
+              <div>
+                <h3 className="text-gray-200 font-semibold">Story Book</h3>
+                <p className="text-gray-400 text-xs mt-1">
+                  Play a story book full-screen before this stage starts, or when its goal is completed.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Story before stage</label>
+                  <select
+                    value={selectedStage.beforeStoryId ?? ''}
+                    onChange={(e) => updateStage(selectedStage.id, { beforeStoryId: e.target.value || undefined })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— None —</option>
+                    {storyBooks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Story after stage</label>
+                  <select
+                    value={selectedStage.afterStoryId ?? ''}
+                    onChange={(e) => updateStage(selectedStage.id, { afterStoryId: e.target.value || undefined })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— None —</option>
+                    {storyBooks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
               </div>
             </section>
 

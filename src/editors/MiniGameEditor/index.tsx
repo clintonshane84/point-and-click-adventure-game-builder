@@ -99,7 +99,7 @@ export default { name, version, launch }
 
 const SDK_LIBRARY = [
   { label: 'David vs Goliath — Stone Throw',        source: stonethrowSource },
-  { label: 'Harp of David — Heal the King',         source: harpSource },
+  { label: 'Harp of David — Heal the King',         source: harpSource, touchKeys: ['A', 'S', 'D', 'F', 'J'] },
   { label: 'Chase & Rescue — David and the Lion',   source: chaseSource },
   { label: "Shepherd's Watch — Guard the Flock",    source: shepherdSource },
   { label: 'Example: Click the Target',             source: exampleSource },
@@ -129,7 +129,7 @@ export function MiniGameEditor() {
     setSelectedId(mg.id)
   }
 
-  const handleAddFromLibrary = (source: string) => {
+  const handleAddFromLibrary = (source: string, touchKeys?: string[]) => {
     setShowLibrary(false)
     const match = source.match(/name:\s*['"`](.+?)['"`]/)
     const mg: MiniGame = {
@@ -137,6 +137,7 @@ export function MiniGameEditor() {
       name: match?.[1] ?? 'SDK Mini-Game',
       description: '',
       source,
+      touchKeys,
     }
     addMiniGame(mg)
     setSelectedId(mg.id)
@@ -338,7 +339,7 @@ export function MiniGameEditor() {
                   {SDK_LIBRARY.map((item) => (
                     <button
                       key={item.label}
-                      onClick={() => handleAddFromLibrary(item.source)}
+                      onClick={() => handleAddFromLibrary(item.source, item.touchKeys)}
                       className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
                     >
                       {item.label}
@@ -409,6 +410,14 @@ export function MiniGameEditor() {
                   onChange={(e) => updateMiniGame(selected.id, { description: e.target.value })}
                   placeholder="Description (optional)"
                   className="w-full bg-transparent text-gray-400 text-xs focus:outline-none border-b border-transparent focus:border-indigo-500"
+                />
+                <input
+                  value={(selected.touchKeys ?? []).join(', ')}
+                  onChange={(e) => updateMiniGame(selected.id, {
+                    touchKeys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean),
+                  })}
+                  placeholder="Touch keys, e.g. A, S, D (blank = arrows and Space)"
+                  className="w-full bg-transparent text-gray-500 text-xs focus:outline-none border-b border-transparent focus:border-indigo-500"
                 />
               </div>
               <input

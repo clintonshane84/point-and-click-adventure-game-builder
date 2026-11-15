@@ -16,6 +16,7 @@ import { QuestEditor } from './editors/QuestEditor'
 import { CursorEditor } from './editors/CursorEditor'
 import { CharacterEditor } from './editors/CharacterEditor'
 import { CinematicEditor } from './editors/CinematicEditor'
+import { StoryTellerEditor } from './editors/StoryTellerEditor'
 import { MiniGameEditor } from './editors/MiniGameEditor'
 import { PreviewGameManager } from './editors/PreviewGameManager'
 import { ExportGameManager } from './editors/ExportGameManager'
@@ -57,6 +58,7 @@ function App() {
       case 'cursor':      return <CursorEditor />
       case 'character':   return <CharacterEditor />
       case 'cinematic':   return <CinematicEditor />
+      case 'storyteller': return <StoryTellerEditor />
       case 'minigame':    return <MiniGameEditor />
       case 'preview':     return <PreviewGameManager />
       case 'export':      return <ExportGameManager />

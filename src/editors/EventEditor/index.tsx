@@ -48,6 +48,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   play_animation: 'Play Animation',
   stop_animation: 'Stop Animation',
   play_cinematic: 'Play Cinematic',
+  play_story:     'Play Story',
   launch_minigame:'Launch Mini-Game',
   trigger_event:  'Trigger Event',
   add_quest:      'Add Quest',
@@ -125,6 +126,7 @@ function ActionValueEditor({
   events: EventTrigger[]
 }) {
   const quests = useGameStore((s) => s.project.quests ?? [])
+  const storyBooks = useGameStore((s) => s.project.storyBooks ?? [])
   const update = (patch: Partial<FormAction>) => {
     const updated = [...actions]
     updated[idx] = { ...updated[idx], ...patch }
@@ -137,6 +139,15 @@ function ActionValueEditor({
         className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
         <option value="">— select cinematic —</option>
         {cinematics.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+    )
+  }
+  if (action.type === 'play_story') {
+    return (
+      <select value={action.value} onChange={(e) => update({ value: e.target.value })}
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500">
+        <option value="">— select story book —</option>
+        {storyBooks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
       </select>
     )
   }

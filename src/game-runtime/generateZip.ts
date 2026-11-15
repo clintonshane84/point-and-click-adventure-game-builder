@@ -2,7 +2,7 @@ import JSZip from 'jszip'
 import { getStandaloneEngineSource } from './standaloneEngine'
 import type { GameProject } from '../types'
 
-function slug(name: string) {
+export function slug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'my-game'
 }
 

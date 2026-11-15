@@ -105,6 +105,7 @@ Rectangles that characters cannot walk through.
 - Click **Add Blocked Zone** to draw a new zone.
 - Drag zone handles to resize.
 - All characters (main hero and NPCs) are blocked by these zones.
+- A character is stopped by a zone when its **feet** reach it: walking up, the character stops when its feet reach the bottom edge, so its head can overlap a block that is above its feet. Walking down, it stops when its feet reach the top edge. Sideways, it stops at the side.
 - Zone size is compared against the character's **scaled** dimensions — a character scaled down inside a Scale Zone can fit through gaps that the full-size character cannot.
 
 ### Scale Zones (Green)

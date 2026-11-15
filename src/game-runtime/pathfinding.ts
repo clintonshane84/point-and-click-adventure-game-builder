@@ -147,6 +147,26 @@ function stringPull(
   return result
 }
 
+/**
+ * True when a character would stand in a blocked zone. Only the feet count: the character's bottom
+ * edge, across its full width. The head may overlap a zone above it. Standing exactly on an edge is
+ * allowed. fromFeetY sweeps the feet line from the previous position, so a step cannot skip a thin zone.
+ */
+export function feetBlocked(
+  zones: { x: number; y: number; width: number; height: number }[],
+  x: number,
+  width: number,
+  feetY: number,
+  fromFeetY: number = feetY,
+): boolean {
+  const lo = Math.min(feetY, fromFeetY)
+  const hi = Math.max(feetY, fromFeetY)
+  for (const z of zones) {
+    if (x < z.x + z.width && x + width > z.x && hi > z.y && lo < z.y + z.height) return true
+  }
+  return false
+}
+
 export function findPath(
   blockedZones: { x: number; y: number; width: number; height: number }[],
   sceneWidth: number,
@@ -156,7 +176,10 @@ export function findPath(
   toX: number,
   toY: number,
   charWidth = 0,
-  charHeight = 0,
+  _charHeight = 0,
+  // Distance from the path point down to the character's feet. 0 when the path point already is the feet
+  // (NPCs); the hero's path point is its centre, so it passes its height minus half its height.
+  feetOffset = 0,
 ): PathPoint[] {
   const cols = Math.ceil(sceneWidth / GRID_CELL)
   const rows = Math.ceil(sceneHeight / GRID_CELL)
@@ -165,15 +188,14 @@ export function findPath(
   // overlap the obstacle.  Using Math.round instead of floor/ceil avoids the
   // up-to-(GRID_CELL-1) px over-expansion that floor/ceil introduce per side.
   const halfW = charWidth / 2
-  const halfH = charHeight / 2
 
   // Build walkability grid (true = walkable)
   const walkable: boolean[][] = Array.from({ length: rows }, () => new Array(cols).fill(true))
   for (const z of blockedZones) {
     const c0 = Math.max(0, Math.round((z.x - halfW) / GRID_CELL))
     const c1 = Math.min(cols, Math.round((z.x + z.width + halfW) / GRID_CELL))
-    const r0 = Math.max(0, Math.round((z.y - halfH) / GRID_CELL))
-    const r1 = Math.min(rows, Math.round((z.y + z.height + halfH) / GRID_CELL))
+    const r0 = Math.max(0, Math.round((z.y - feetOffset) / GRID_CELL))
+    const r1 = Math.min(rows, Math.max(r0 + 1, Math.round((z.y + z.height - feetOffset) / GRID_CELL)))
     for (let r = r0; r < r1; r++)
       for (let c = c0; c < c1; c++)
         walkable[r][c] = false
@@ -209,8 +231,8 @@ export function findPath(
           let bx = gx, by = gy
           if (dc > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.x - halfW; if (b > gx && b <= (c+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) bx = m - 0.5 }
           else if (dc < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.x + z.width + halfW; if (b < gx && b >= c*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) bx = m + 0.5 }
-          if (dr > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.y - halfH; if (b > gy && b <= (r+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) by = m - 0.5 }
-          else if (dr < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.y + z.height + halfH; if (b < gy && b >= r*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) by = m + 0.5 }
+          if (dr > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.y - feetOffset; if (b > gy && b <= (r+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) by = m - 0.5 }
+          else if (dr < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.y + z.height - feetOffset; if (b < gy && b >= r*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) by = m + 0.5 }
           effectiveToX = bx; effectiveToY = by
         }
         break
@@ -304,8 +326,8 @@ export function findPath(
           let bx = gx, by = gy
           if (dc > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.x - halfW; if (b > gx && b <= (c+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) bx = m - 0.5 }
           else if (dc < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.x + z.width + halfW; if (b < gx && b >= c*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) bx = m + 0.5 }
-          if (dr > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.y - halfH; if (b > gy && b <= (r+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) by = m - 0.5 }
-          else if (dr < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.y + z.height + halfH; if (b < gy && b >= r*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) by = m + 0.5 }
+          if (dr > 0) { let m = Infinity; for (const z of blockedZones) { const b = z.y - feetOffset; if (b > gy && b <= (r+1)*GRID_CELL) m = Math.min(m, b) }; if (isFinite(m)) by = m - 0.5 }
+          else if (dr < 0) { let m = -Infinity; for (const z of blockedZones) { const b = z.y + z.height - feetOffset; if (b < gy && b >= r*GRID_CELL) m = Math.max(m, b) }; if (isFinite(m)) by = m + 0.5 }
           effectiveToX = bx; effectiveToY = by
         }
         break
