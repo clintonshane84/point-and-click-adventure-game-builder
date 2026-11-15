@@ -459,7 +459,8 @@ export interface StoryPage {
   text: string
   imageAssetId?: string   // image asset shown on the page
   audioAssetId?: string   // optional narration audio; overrides text-to-speech
-  voiceName?: string      // speechSynthesis voice name
+  voiceName?: string      // speechSynthesis voice name (browser preview)
+  voiceLang?: string      // language of that voice, e.g. en-GB; used to pick a voice on Android
   rate?: number           // speech rate (0.5–2)
   pitch?: number          // speech pitch (0–2)
 }

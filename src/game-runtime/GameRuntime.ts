@@ -894,7 +894,10 @@ export class GameRuntime {
       // Inside the Android app, speech goes through the native module (WebView speech is unreliable there)
       if (page.text.trim() && hasNativeSpeech()) {
         s.narrating = true
-        postToApp({ type: 'speak', id: token, text: page.text, rate: page.rate ?? 1, pitch: page.pitch ?? 1 })
+        postToApp({
+          type: 'speak', id: token, text: page.text, rate: page.rate ?? 1, pitch: page.pitch ?? 1,
+          voiceName: page.voiceName, voiceLang: page.voiceLang,
+        })
         return
       }
       if (page.text.trim() && 'speechSynthesis' in window) {

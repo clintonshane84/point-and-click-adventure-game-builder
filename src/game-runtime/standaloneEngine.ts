@@ -675,7 +675,7 @@ export class GameEngine {
       // Inside the Android app, speech goes through the native module (WebView speech is unreliable there)
       if(page.text.trim() && _hasNativeSpeech()){
         s.narrating=true;
-        _postToApp({type:'speak', id:token, text:page.text, rate:page.rate||1, pitch:(page.pitch===undefined?1:page.pitch)});
+        _postToApp({type:'speak', id:token, text:page.text, rate:page.rate||1, pitch:(page.pitch===undefined?1:page.pitch), voiceName:page.voiceName, voiceLang:page.voiceLang});
         return;
       }
       if(page.text.trim() && ('speechSynthesis' in window)){

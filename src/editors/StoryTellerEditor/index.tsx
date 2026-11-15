@@ -346,7 +346,10 @@ export function StoryTellerEditor() {
                           <label className="text-xs text-gray-500 block mb-1">Voice</label>
                           <select
                             value={page.voiceName ?? ''}
-                            onChange={(e) => updateStoryPage(book.id, page.id, { voiceName: e.target.value || undefined })}
+                            onChange={(e) => {
+                              const chosen = voices.find((v) => v.name === e.target.value)
+                              updateStoryPage(book.id, page.id, { voiceName: chosen?.name, voiceLang: chosen?.lang })
+                            }}
                             className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-amber-500"
                           >
                             <option value="">Default voice</option>
