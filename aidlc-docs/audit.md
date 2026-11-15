@@ -126,3 +126,10 @@
 **Context**: Pathing zone feet rule; no commit made.
 
 ---
+## Android: X Axis Shifted Left
+**Timestamp**: 2026-11-15T00:00:00Z
+**User Input**: "The exported Android game ... the y axis is ok but the x axis is shifted left by about 50 - 80px."
+**AI Response**: Cause: the high-density change set explicit CSS width/height on the canvas. On a wide phone screen the canvas kept those sizes instead of its aspect ratio, so the game was letterboxed sideways. Removed the explicit CSS sizes from both engines; the canvas now keeps the bitmap's 16:9 ratio. Verified in the browser on the regenerated export: shown ratio 1.778 equals bitmap ratio, centred. User must re-export and rebuild the APK.
+**Context**: Layout fix; no commit made.
+
+---

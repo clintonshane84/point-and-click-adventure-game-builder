@@ -248,8 +248,8 @@ export class GameEngine {
     _LOGICAL_SIZE.set(canvas,{w:this.lw, h:this.lh, pw:canvas.width, ph:canvas.height});
     this.sx=canvas.width/this.lw;
     this.sy=canvas.height/this.lh;
-    canvas.style.width=this.lw+'px';
-    canvas.style.height=this.lh+'px';
+    // Do not set CSS width/height here: explicit sizes stop the canvas keeping its aspect ratio,
+    // which letterboxes the game sideways. The bitmap's own ratio is what CSS scales.
     this.ctx.setTransform(this.sx,0,0,this.sy,0,0);
     this.project = project;
     this.imageCache = new Map();
