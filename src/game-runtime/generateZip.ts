@@ -2,7 +2,7 @@ import JSZip from 'jszip'
 import { getStandaloneEngineSource } from './standaloneEngine'
 import type { GameProject } from '../types'
 
-function slug(name: string) {
+export function slug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'my-game'
 }
 
@@ -53,7 +53,7 @@ export default defineConfig({
   </head>
   <body>
     <div id="app">
-      <canvas id="game-canvas" width="${w}" height="${h}"></canvas>
+      <canvas id="game-canvas" width="${w}" height="${h}" draggable="false"></canvas>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
@@ -75,6 +75,8 @@ html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hi
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 `)
 

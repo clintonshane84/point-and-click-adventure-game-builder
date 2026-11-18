@@ -5,6 +5,15 @@ import { GameRuntime } from '../../game-runtime/GameRuntime'
 
 type PlayState = 'stopped' | 'playing'
 
+// Shallow-clone each scene's objects array so runtime mutations (spawn_object)
+// don't propagate back to the Zustand store after preview stops.
+function isolateProject(project: ReturnType<typeof useGameStore.getState>['project']) {
+  return {
+    ...project,
+    scenes: project.scenes.map((s) => ({ ...s, objects: [...s.objects] })),
+  }
+}
+
 export function PreviewGameManager() {
   const project = useGameStore((s) => s.project)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -27,7 +36,7 @@ export function PreviewGameManager() {
       runtimeRef.current.stop()
       const canvas = canvasRef.current
       if (canvas) {
-        runtimeRef.current = new GameRuntime(canvas, project)
+        runtimeRef.current = new GameRuntime(canvas, isolateProject(project))
         runtimeRef.current.start()
       }
     }
@@ -43,7 +52,7 @@ export function PreviewGameManager() {
     }
 
     setStatusMsg('')
-    runtimeRef.current = new GameRuntime(canvas, project)
+    runtimeRef.current = new GameRuntime(canvas, isolateProject(project))
     runtimeRef.current.start()
     setPlayState('playing')
   }

@@ -22,6 +22,8 @@ import type {
   NpcCharacter,
   Cinematic,
   CinematicStep,
+  StoryBook,
+  StoryPage,
   CharacterAnimation,
   FacingDirection,
   CharacterPlacement,
@@ -29,6 +31,8 @@ import type {
   ScaleZone,
   TeleportZone,
   MiniGame,
+  Quest,
+  QuestObjective,
 } from '../types'
 
 const defaultScene: Scene = {
@@ -47,6 +51,20 @@ const defaultStage: Stage = {
   startingSceneId: 'scene-1',
   sceneIds: ['scene-1'],
   description: '',
+}
+
+/**
+ * Keeps the game-start flag valid: at most one book, and only on a book with exactly one page.
+ * Applied when a project is loaded, so files saved in any state load consistently.
+ */
+function normalizeGameStart(books: StoryBook[]): StoryBook[] {
+  let claimed = false
+  return books.map((b) => {
+    const on = !!b.playAtGameStart && !claimed && b.pages.length === 1
+    if (on) claimed = true
+    if (on === !!b.playAtGameStart) return b
+    return { ...b, playAtGameStart: on }
+  })
 }
 
 const defaultSettings: GameSettings = {
@@ -110,6 +128,7 @@ const defaultProject: GameProject = {
   mainCharacter: defaultMainCharacter,
   npcs: [],
   cinematics: [],
+  storyBooks: [],
   settings: defaultSettings,
   titleScreen: defaultTitleScreen,
   stages: [defaultStage],
@@ -120,7 +139,9 @@ const defaultProject: GameProject = {
 interface GameStore {
   project: GameProject
   activeEditor: EditorType
+  fileOpen: boolean
   setActiveEditor: (editor: EditorType) => void
+  setFileOpen: (open: boolean) => void
   loadProject: (project: GameProject) => void
 
   // Scene actions
@@ -202,6 +223,15 @@ interface GameStore {
   deleteCinematicStep: (cinematicId: string, stepId: string) => void
   moveCinematicStep: (cinematicId: string, stepId: string, direction: 'up' | 'down') => void
 
+  // Story Teller actions
+  addStoryBook: (book: StoryBook) => void
+  updateStoryBook: (id: string, updates: Partial<StoryBook>) => void
+  deleteStoryBook: (id: string) => void
+  addStoryPage: (bookId: string, page: StoryPage) => void
+  updateStoryPage: (bookId: string, pageId: string, updates: Partial<StoryPage>) => void
+  deleteStoryPage: (bookId: string, pageId: string) => void
+  moveStoryPage: (bookId: string, pageId: string, direction: 'up' | 'down') => void
+
   // Blocked zone (pathfinding) actions
   addBlockedZone: (sceneId: string, zone: BlockedZone) => void
   updateBlockedZone: (sceneId: string, zoneId: string, updates: Partial<BlockedZone>) => void
@@ -221,13 +251,23 @@ interface GameStore {
   addMiniGame: (mg: MiniGame) => void
   updateMiniGame: (id: string, updates: Partial<MiniGame>) => void
   deleteMiniGame: (id: string) => void
+
+  // Quest actions
+  addQuest: (quest: Quest) => void
+  updateQuest: (id: string, updates: Partial<Quest>) => void
+  deleteQuest: (id: string) => void
+  addQuestObjective: (questId: string, objective: QuestObjective) => void
+  updateQuestObjective: (questId: string, objId: string, updates: Partial<QuestObjective>) => void
+  deleteQuestObjective: (questId: string, objId: string) => void
 }
 
 export const useGameStore = create<GameStore>((set) => ({
   project: defaultProject,
   activeEditor: 'scene',
+  fileOpen: false,
 
   setActiveEditor: (editor) => set({ activeEditor: editor }),
+  setFileOpen: (open) => set({ fileOpen: open }),
 
   loadProject: (project) =>
     set({
@@ -242,6 +282,7 @@ export const useGameStore = create<GameStore>((set) => ({
         mainCharacter: project.mainCharacter ?? defaultMainCharacter,
         npcs: project.npcs ?? [],
         cinematics: project.cinematics ?? [],
+        storyBooks: normalizeGameStart(project.storyBooks ?? []),
         miniGames: project.miniGames ?? [],
         updatedAt: new Date().toISOString(),
       },
@@ -969,6 +1010,109 @@ export const useGameStore = create<GameStore>((set) => ({
       },
     })),
 
+  // Story Teller actions
+  addStoryBook: (book) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: [...(state.project.storyBooks ?? []), book],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateStoryBook: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id === id) {
+            const next = { ...b, ...updates }
+            // Game start needs a single-page book
+            if (updates.playAtGameStart) next.playAtGameStart = b.pages.length === 1
+            return next
+          }
+          // Only one book can play at game start
+          const turningOn = updates.playAtGameStart && (state.project.storyBooks ?? []).find((x) => x.id === id)?.pages.length === 1
+          return turningOn ? { ...b, playAtGameStart: false } : b
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteStoryBook: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).filter((b) => b.id !== id),
+        // Clear stage hooks that pointed at the deleted book
+        stages: state.project.stages.map((s) => ({
+          ...s,
+          beforeStoryId: s.beforeStoryId === id ? undefined : s.beforeStoryId,
+          afterStoryId: s.afterStoryId === id ? undefined : s.afterStoryId,
+        })),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addStoryPage: (bookId, page) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id !== bookId) return b
+          const pages = [...b.pages, page]
+          // A game-start book must stay single-page
+          return { ...b, pages, playAtGameStart: pages.length === 1 ? b.playAtGameStart : false }
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateStoryPage: (bookId, pageId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) =>
+          b.id === bookId
+            ? { ...b, pages: b.pages.map((p) => (p.id === pageId ? { ...p, ...updates } : p)) }
+            : b
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteStoryPage: (bookId, pageId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id !== bookId) return b
+          const pages = b.pages.filter((p) => p.id !== pageId)
+          // A game-start book must stay single-page
+          return { ...b, pages, playAtGameStart: pages.length === 1 ? b.playAtGameStart : false }
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  moveStoryPage: (bookId, pageId, direction) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        storyBooks: (state.project.storyBooks ?? []).map((b) => {
+          if (b.id !== bookId) return b
+          const pages = [...b.pages]
+          const idx = pages.findIndex((p) => p.id === pageId)
+          if (idx < 0) return b
+          const target = direction === 'up' ? idx - 1 : idx + 1
+          if (target < 0 || target >= pages.length) return b
+          ;[pages[idx], pages[target]] = [pages[target], pages[idx]]
+          return { ...b, pages }
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
   // Mini-game actions
   addMiniGame: (mg) =>
     set((state) => ({
@@ -995,6 +1139,76 @@ export const useGameStore = create<GameStore>((set) => ({
       project: {
         ...state.project,
         miniGames: (state.project.miniGames ?? []).filter((m) => m.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  // Quest actions
+  addQuest: (quest) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: [...(state.project.quests ?? []), quest],
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateQuest: (id, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) => (q.id === id ? { ...q, ...updates } : q)),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteQuest: (id) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).filter((q) => q.id !== id),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  addQuestObjective: (questId, objective) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) =>
+          q.id === questId ? { ...q, objectives: [...(q.objectives ?? []), objective] } : q
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  updateQuestObjective: (questId, objId, updates) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) =>
+          q.id === questId
+            ? {
+                ...q,
+                objectives: (q.objectives ?? []).map((o) =>
+                  o.id === objId ? { ...o, ...updates } : o
+                ),
+              }
+            : q
+        ),
+        updatedAt: new Date().toISOString(),
+      },
+    })),
+
+  deleteQuestObjective: (questId, objId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        quests: (state.project.quests ?? []).map((q) =>
+          q.id === questId
+            ? { ...q, objectives: (q.objectives ?? []).filter((o) => o.id !== objId) }
+            : q
+        ),
         updatedAt: new Date().toISOString(),
       },
     })),

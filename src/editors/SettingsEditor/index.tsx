@@ -118,6 +118,47 @@ export function SettingsEditor() {
           </div>
         </section>
 
+        {/* Android app (Expo export) */}
+        <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 mb-6 space-y-4">
+          <div>
+            <h3 className="text-gray-200 font-semibold">Android App</h3>
+            <p className="text-gray-400 text-xs mt-1">Used by the Export Android (Expo) project.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="col-span-2">
+              <label className="text-xs text-gray-400 block mb-1">Package ID (leave blank to generate)</label>
+              <input
+                type="text"
+                value={form.androidPackageId ?? ''}
+                placeholder="com.yourcompany.yourgame"
+                onChange={(e) => setForm((f) => ({ ...f, androidPackageId: e.target.value.trim() }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Version Code</label>
+              <input
+                type="number"
+                min={1}
+                value={form.versionCode ?? 1}
+                onChange={(e) => setForm((f) => ({ ...f, versionCode: Math.max(1, parseInt(e.target.value) || 1) }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Orientation</label>
+            <select
+              value={form.orientation ?? (form.resolutionWidth >= form.resolutionHeight ? 'landscape' : 'portrait')}
+              onChange={(e) => setForm((f) => ({ ...f, orientation: e.target.value as 'landscape' | 'portrait' }))}
+              className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="landscape">Landscape</option>
+              <option value="portrait">Portrait</option>
+            </select>
+          </div>
+        </section>
+
         {/* Display Settings */}
         <section className="bg-gray-800 border border-gray-700 rounded-xl p-6 mb-6 space-y-4">
           <h2 className="text-gray-200 font-semibold text-lg">Display</h2>

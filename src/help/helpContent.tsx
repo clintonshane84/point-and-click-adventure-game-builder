@@ -474,7 +474,7 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
         <Table
           rows={[
             ['new_game', 'Starts a new game from the starting scene'],
-            ['load_game', 'Opens the save slot selection screen'],
+            ['load_game', 'Opens the Load Game screen to pick a saved slot'],
             ['settings', 'Opens the player settings dialog'],
             ['quit', 'Closes the application (desktop only)'],
             ['custom', 'Any custom action name for extended logic'],
@@ -680,7 +680,7 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
         <Ul>
           <Li>Title screen is not shown — the preview starts directly at the starting scene.</Li>
           <Li>Goal conditions are not checked (use the Goal Editor to review them).</Li>
-          <Li>Save/load slots are not active in preview mode.</Li>
+          <Li>Save slots work in preview. Saves are kept in this browser, separately for each game.</Li>
         </Ul>
 
         <Tip>
@@ -749,6 +749,50 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
           The character is a single shared definition across all scenes. If you change the sprite
           size here, the placement markers in all scenes will reflect the new size immediately.
         </Warn>
+      </>
+    ),
+  },
+
+  storyteller: {
+    title: 'Story Teller',
+    content: (
+      <>
+        <P>
+          The Story Teller lets you write a story as a book. Each story book is a set of pages that the
+          player turns with a page-flip animation. Pages can show text, an illustration, and be read aloud.
+          Unlike cinematics, the player keeps control of the game while the story is not playing — the
+          story is a full-screen book that runs when you choose to show it.
+        </P>
+
+        {H('Creating a story book')}
+        <Ul>
+          <Li>Click <Code>+</Code> in the left panel to create a book.</Li>
+          <Li>Add pages with the <Code>+</Code> in the page list, then write the text for each page.</Li>
+          <Li>Optionally choose an illustration from your Assets for each page.</Li>
+        </Ul>
+
+        {H('Narration')}
+        <Ul>
+          <Li><strong>Read each page aloud</strong> reads the page text with the browser's built-in voice.</Li>
+          <Li>Pick a voice, speed and pitch per page, or use <Code>Listen</Code> to hear it in the editor.</Li>
+          <Li>Choose a <strong>narration audio</strong> asset to use a recording instead of the voice.</Li>
+          <Li><strong>Turn page when narration ends</strong> moves on automatically after each page is read.</Li>
+        </Ul>
+
+        {H('Playing a story')}
+        <Table
+          rows={[
+            ['Before a stage', 'Set "Story before stage" in the Stage Editor. It plays before the stage begins.'],
+            ['After a stage', 'Set "Story after stage" in the Stage Editor. It plays when the stage\'s goal is completed.'],
+            ['Event action', 'Use the Play Story action in the Event Editor to show a book at any point.'],
+            ['Game start', 'Tick "Play at game start" on a one-page story book to show it before the title menu. Only one book can do this.'],
+          ]}
+        />
+
+        <Tip>
+          During a story the player can click or press → to turn pages, ← to go back, and Esc to skip.
+          Use Cinematics for scripted character action; use the Story Teller for narration and storytelling.
+        </Tip>
       </>
     ),
   },
@@ -876,6 +920,28 @@ export const HELP_CONTENT: Record<EditorType, HelpSection> = {
           never create a new canvas. Call <Code>game.destroy(false)</Code> in <Code>destroy()</Code>
           to avoid removing the canvas element from the DOM.
         </Tip>
+      </>
+    ),
+  },
+
+  quest: {
+    title: 'Quest Log',
+    content: (
+      <>
+        <P>
+          The Quest Log lets you define predefined quests that can be activated during gameplay via event actions.
+          Players see a notification when a new quest starts and can open the quest log in-game to track progress.
+        </P>
+        <P>
+          <strong>Creating quests:</strong> Use the Quest Log editor to define each quest with a name, description, and optional objectives.
+          Quests are identified by their ID, which is used in event actions.
+        </P>
+        <P>
+          <strong>In-game controls:</strong> Press <strong>J</strong> or click the 📜 button (top-right of the game canvas) to toggle the quest log panel.
+        </P>
+        <P>
+          <strong>Event actions:</strong> Use <strong>Add Quest</strong> to activate a quest (shows a notification dialog) and <strong>Complete Quest</strong> to mark it done.
+        </P>
       </>
     ),
   },

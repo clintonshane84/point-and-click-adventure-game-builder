@@ -6,6 +6,7 @@ import {
   Layers,
   User,
   Film,
+  Library,
   Gamepad2,
   Settings,
   Monitor,
@@ -14,6 +15,7 @@ import {
   MousePointer2,
   Play,
   Download,
+  ScrollText,
 } from 'lucide-react'
 import { useGameStore } from '../store/useGameStore'
 import type { EditorType } from '../types'
@@ -32,11 +34,13 @@ const editorItems: NavItem[] = [
   { id: 'sprite', label: 'Sprites', icon: <Layers size={20} /> },
   { id: 'character', label: 'Characters', icon: <User size={20} /> },
   { id: 'cinematic', label: 'Cinematics', icon: <Film size={20} /> },
+  { id: 'storyteller', label: 'Story Teller', icon: <Library size={20} /> },
   { id: 'minigame', label: 'Mini Games', icon: <Gamepad2 size={20} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
   { id: 'titlescreen', label: 'Title Screen', icon: <Monitor size={20} /> },
   { id: 'stage', label: 'Stage Editor', icon: <BookOpen size={20} /> },
   { id: 'goal', label: 'Goal Editor', icon: <Target size={20} /> },
+  { id: 'quest', label: 'Quest Log', icon: <ScrollText size={20} /> },
   { id: 'cursor', label: 'Cursor Editor', icon: <MousePointer2 size={20} /> },
 ]
 

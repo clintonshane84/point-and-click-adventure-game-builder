@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useGameStore } from '../../store/useGameStore'
 import { generateGameZip, downloadBlob } from '../../game-runtime/generateZip'
+import { generateExpoZip } from '../../game-runtime/generateExpoZip'
 
 type ExportStatus = 'idle' | 'building' | 'done' | 'error'
 
@@ -36,6 +37,8 @@ export function ExportGameManager() {
   const [status, setStatus] = useState<ExportStatus>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [exportedName, setExportedName] = useState('')
+  const [androidStatus, setAndroidStatus] = useState<ExportStatus>('idle')
+  const [androidMsg, setAndroidMsg] = useState('')
 
   const title = project.settings.title || 'My Adventure Game'
   const w = project.settings.resolutionWidth || 1280
@@ -53,6 +56,21 @@ export function ExportGameManager() {
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Unknown error')
       setStatus('error')
+    }
+  }
+
+  async function handleExportAndroid() {
+    setAndroidStatus('building')
+    setAndroidMsg('')
+    try {
+      const blob = await generateExpoZip(project)
+      const filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-android.zip`
+      downloadBlob(blob, filename)
+      setAndroidMsg(`${filename} downloaded`)
+      setAndroidStatus('done')
+    } catch (err) {
+      setAndroidMsg(err instanceof Error ? err.message : 'Unknown error')
+      setAndroidStatus('error')
     }
   }
 
@@ -120,6 +138,34 @@ export function ExportGameManager() {
               </>
             )}
           </button>
+
+          <button
+            onClick={handleExportAndroid}
+            disabled={androidStatus === 'building'}
+            className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-sm transition-colors bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {androidStatus === 'building' ? (
+              <>
+                <Loader size={16} className="animate-spin" />
+                Building Android project…
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                Export Android (Expo) project
+              </>
+            )}
+          </button>
+          {androidStatus === 'done' && (
+            <p className="mt-2 text-xs text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle size={12} /> {androidMsg}
+            </p>
+          )}
+          {androidStatus === 'error' && (
+            <p className="mt-2 text-xs text-red-400 flex items-start gap-1.5">
+              <AlertCircle size={12} className="shrink-0 mt-0.5" /> <span>{androidMsg}</span>
+            </p>
+          )}
 
           {status === 'done' && (
             <div className="mt-3 flex items-center gap-2 text-green-400 text-sm">

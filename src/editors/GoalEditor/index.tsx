@@ -258,15 +258,33 @@ export function GoalEditor() {
                                 </option>
                               ))}
                             </select>
-                            <input
-                              type="text"
-                              placeholder="Target / variable name"
-                              value={cond.target}
-                              onChange={(e) =>
-                                updateGoalCondition(goal.id, cond.id, { target: e.target.value })
-                              }
-                              className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
-                            />
+                            {cond.type === 'variable_equals' ? (
+                              <select
+                                value={cond.target}
+                                onChange={(e) =>
+                                  updateGoalCondition(goal.id, cond.id, { target: e.target.value })
+                                }
+                                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                              >
+                                <option value="">— variable —</option>
+                                {(stages.find((s) => s.id === selectedStageId)?.variables ?? []).map((v) => (
+                                  <option key={v.id} value={v.name}>{v.name}</option>
+                                ))}
+                                {cond.target && !(stages.find((s) => s.id === selectedStageId)?.variables ?? []).some((v) => v.name === cond.target) && (
+                                  <option value={cond.target}>{cond.target} (custom)</option>
+                                )}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="Target / scene / item"
+                                value={cond.target}
+                                onChange={(e) =>
+                                  updateGoalCondition(goal.id, cond.id, { target: e.target.value })
+                                }
+                                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                              />
+                            )}
                             <select
                               value={cond.operator}
                               onChange={(e) =>

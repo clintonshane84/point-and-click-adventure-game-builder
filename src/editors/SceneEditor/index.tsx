@@ -1616,7 +1616,7 @@ export function SceneEditor() {
               <label className="text-xs text-gray-400 block mb-1">Background Image</label>
               {activeScene.backgroundImageUrl ? (
                 <div className="relative mb-2 rounded overflow-hidden border border-gray-600 group">
-                  <img src={activeScene.backgroundImageUrl} alt="bg" className="w-full h-16 object-cover" />
+                  <img src={activeScene.backgroundImageUrl} alt="bg" className="w-full h-16 object-cover" draggable={false} />
                   <button
                     onClick={handleClearBgImage}
                     className="absolute top-1 right-1 p-0.5 rounded bg-gray-900/80 text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1661,7 +1661,7 @@ export function SceneEditor() {
                             onClick={() => handleSetBgImage(asset.url)}
                             className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-gray-700 text-left"
                           >
-                            <img src={asset.url} alt={asset.name} className="w-9 h-6 object-cover rounded border border-gray-600 shrink-0" />
+                            <img src={asset.url} alt={asset.name} className="w-9 h-6 object-cover rounded border border-gray-600 shrink-0" draggable={false} />
                             <span className="text-xs text-gray-300 truncate">{asset.name}</span>
                           </button>
                         ))}
